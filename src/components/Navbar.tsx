@@ -53,11 +53,11 @@ export function Navbar() {
         >
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
-            src="/logo.png"
+            src="/fastcc-logo.png"
             alt="FastCC QR"
             width={32}
             height={32}
-            className="h-8 w-8 rounded-lg border border-border object-cover"
+            className="h-8 w-8 rounded-lg border border-border bg-white object-contain p-0.5"
           />
           <span className="text-base font-semibold tracking-tight">
             FastCC QR

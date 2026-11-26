@@ -10,6 +10,14 @@ export function Footer() {
         <div className="grid gap-8 sm:grid-cols-3">
           <div>
             <div className="flex items-center gap-2">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src="/fastcc-logo.png"
+                alt="FastCC QR"
+                width={24}
+                height={24}
+                className="h-6 w-6 rounded border border-border bg-white object-contain p-0.5"
+              />
               <span className="text-sm font-semibold text-ink">FastCC QR</span>
               <span className="rounded border border-border bg-canvas-muted px-1.5 py-0.5 font-mono text-[11px] text-ink-muted">
                 Operations

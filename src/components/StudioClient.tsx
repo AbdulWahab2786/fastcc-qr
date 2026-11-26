@@ -94,9 +94,9 @@ export function StudioClient({
   const [showLogoAuthPrompt, setShowLogoAuthPrompt] = useState(false);
 
   const activeLogoSrc = !isAuthenticated
-    ? "/logo.png"
+    ? "/fastcc-logo.png"
     : logoMode === "fastcc"
-      ? "/logo.png"
+      ? "/fastcc-logo.png"
       : logoMode === "custom"
         ? customLogoDataUrl
         : null;

@@ -88,9 +88,19 @@ export function LoginForm() {
   return (
     <div className="w-full max-w-md rounded-xl border border-border bg-surface p-6 sm:p-8">
       <div className="mb-6">
-        <span className="inline-flex items-center rounded-md border border-border bg-canvas-muted px-2 py-0.5 font-mono text-[11px] font-medium text-ink-muted">
-          OPERATOR ACCESS
-        </span>
+        <div className="flex items-center gap-2.5">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/fastcc-logo.png"
+            alt="FastCC QR"
+            width={28}
+            height={28}
+            className="h-7 w-7 rounded-md border border-border bg-white object-contain p-0.5"
+          />
+          <span className="inline-flex items-center rounded-md border border-border bg-canvas-muted px-2 py-0.5 font-mono text-[11px] font-medium text-ink-muted">
+            OPERATOR ACCESS
+          </span>
+        </div>
         <h1 className="mt-3 text-xl font-semibold tracking-tight text-ink">
           {mode === "signin"
             ? "Sign in to Manager Dashboard"

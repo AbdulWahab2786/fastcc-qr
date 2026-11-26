@@ -91,6 +91,47 @@ function wrapCanvasText(
   return lines.slice(0, maxLines);
 }
 
+function drawContainedLogo(
+  ctx: CanvasRenderingContext2D,
+  img: HTMLImageElement,
+  qrX: number,
+  qrY: number,
+  qrSize: number,
+  pad: number,
+): void {
+  const boxSize = Math.round(qrSize * 0.22);
+  const boxX = Math.round(qrX + (qrSize - boxSize) / 2);
+  const boxY = Math.round(qrY + (qrSize - boxSize) / 2);
+
+  ctx.fillStyle = "#FFFFFF";
+  drawRoundedRect(
+    ctx,
+    boxX - pad,
+    boxY - pad,
+    boxSize + pad * 2,
+    boxSize + pad * 2,
+    16,
+  );
+  ctx.fill();
+  ctx.strokeStyle = "#E2E8F0";
+  ctx.lineWidth = 3;
+  ctx.stroke();
+
+  const naturalW = img.naturalWidth || boxSize;
+  const naturalH = img.naturalHeight || boxSize;
+  const scale = Math.min(boxSize / naturalW, boxSize / naturalH);
+  const drawW = naturalW * scale;
+  const drawH = naturalH * scale;
+  const drawX = boxX + (boxSize - drawW) / 2;
+  const drawY = boxY + (boxSize - drawH) / 2;
+
+  ctx.save();
+  drawRoundedRect(ctx, boxX, boxY, boxSize, boxSize, 12);
+  ctx.clip();
+  ctx.drawImage(img, drawX, drawY, drawW, drawH);
+  ctx.restore();
+}
+
 /** Generates a crisp SVG string for a QR code with ECC level H. */
 export async function generateQrSvgString(
   qrUrl: string,
@@ -133,24 +174,7 @@ export async function downloadQrPng(
     if (ctx) {
       try {
         const img = await loadImage(logoSrc);
-        const boxSize = Math.round(size * 0.22);
-        const boxX = Math.round((size - boxSize) / 2);
-        const boxY = Math.round((size - boxSize) / 2);
-        const pad = 12;
-
-        ctx.fillStyle = "#FFFFFF";
-        drawRoundedRect(ctx, boxX - pad, boxY - pad, boxSize + pad * 2, boxSize + pad * 2, 20);
-        ctx.fill();
-
-        ctx.strokeStyle = "#E2E8F0";
-        ctx.lineWidth = 4;
-        ctx.stroke();
-
-        ctx.save();
-        drawRoundedRect(ctx, boxX, boxY, boxSize, boxSize, 14);
-        ctx.clip();
-        ctx.drawImage(img, boxX, boxY, boxSize, boxSize);
-        ctx.restore();
+        drawContainedLogo(ctx, img, 0, 0, size, 12);
       } catch {
         // Skip logo overlay if image fails to load.
       }
@@ -324,30 +348,7 @@ export async function downloadStickerPng(
   if (config.logoSrc) {
     try {
       const logoImg = await loadImage(config.logoSrc);
-      const boxSize = Math.round(qrSize * 0.22);
-      const boxX = Math.round(qrX + (qrSize - boxSize) / 2);
-      const boxY = Math.round(qrY + (qrSize - boxSize) / 2);
-      const pad = 10;
-
-      ctx.fillStyle = "#FFFFFF";
-      drawRoundedRect(
-        ctx,
-        boxX - pad,
-        boxY - pad,
-        boxSize + pad * 2,
-        boxSize + pad * 2,
-        16,
-      );
-      ctx.fill();
-      ctx.strokeStyle = "#E2E8F0";
-      ctx.lineWidth = 3;
-      ctx.stroke();
-
-      ctx.save();
-      drawRoundedRect(ctx, boxX, boxY, boxSize, boxSize, 12);
-      ctx.clip();
-      ctx.drawImage(logoImg, boxX, boxY, boxSize, boxSize);
-      ctx.restore();
+      drawContainedLogo(ctx, logoImg, qrX, qrY, qrSize, 10);
     } catch {
       // Ignore logo load failures during export.
     }

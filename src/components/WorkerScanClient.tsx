@@ -14,7 +14,6 @@ import {
   Globe,
   Loader2,
   ShieldCheck,
-  Sparkles,
   XCircle,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
@@ -965,7 +964,14 @@ export function WorkerScanClient({
               href="/"
               className="flex min-h-12 w-full items-center justify-center gap-2 rounded-xl border border-border bg-surface px-4 text-xs font-semibold text-ink-muted transition-colors hover:border-ink hover:text-ink"
             >
-              <Sparkles className="h-4 w-4 text-action-green" />
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src="/fastcc-logo.png"
+                alt="FastCC QR"
+                width={20}
+                height={20}
+                className="h-5 w-5 rounded border border-border bg-white object-contain p-0.5"
+              />
               <span>Powered by FastCC QR — Create Free Operational QRs</span>
             </Link>
           </footer>
