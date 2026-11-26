@@ -104,6 +104,7 @@ export function HomeWorkbench() {
       title,
       description,
       category,
+      type: isUrlTab ? "url" : "standard",
     });
 
     setPreview({

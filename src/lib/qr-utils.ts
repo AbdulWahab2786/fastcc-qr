@@ -207,6 +207,7 @@ export interface CreateGuestQrInput {
   title: string;
   description: string;
   category: string;
+  type?: string;
 }
 
 export interface CreateGuestQrResult {
@@ -216,7 +217,9 @@ export interface CreateGuestQrResult {
 }
 
 /**
- * Inserts a guest QR record into Supabase (`user_id: null`, `show_watermark: true`).
+ * Inserts a QR record into Supabase. Links `user_id` and disables the
+ * watermark when the caller is authenticated; otherwise inserts an anonymous
+ * guest record (`user_id: null`, `show_watermark: true`).
  * Falls back to a local record if Supabase env vars are not configured or insert fails.
  */
 export async function createGuestQrCode(
@@ -227,6 +230,7 @@ export async function createGuestQrCode(
   const title = input.title.trim() || "Untitled Operations QR";
   const description = input.description.trim() || null;
   const category = input.category || "general";
+  const type = input.type || "standard";
 
   const localFallbackRecord: QrCodeRow = {
     id:
@@ -238,7 +242,7 @@ export async function createGuestQrCode(
     title,
     description,
     category,
-    type: "standard",
+    type,
     config_json: {},
     show_watermark: true,
     created_at: now,
@@ -257,15 +261,21 @@ export async function createGuestQrCode(
 
   try {
     const supabase = createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    const userId = user?.id ?? null;
+
     const { data, error } = await supabase
       .from("qr_codes")
       .insert({
         short_code: shortCode,
-        user_id: null,
+        user_id: userId,
         title,
         description,
         category,
-        show_watermark: true,
+        type,
+        show_watermark: !userId,
       })
       .select()
       .single();

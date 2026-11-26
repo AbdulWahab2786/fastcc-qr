@@ -105,9 +105,10 @@ export interface PersistAiQrResult {
 }
 
 /**
- * Persists an AI-generated QR code (and optional SOP steps) to Supabase with
- * `user_id: null` and `show_watermark: true`, falling back cleanly when
- * Supabase env vars are missing or unreachable.
+ * Persists an AI-generated QR code (and optional SOP steps) to Supabase.
+ * Attaches `user_id` when the caller is authenticated, or saves as an
+ * anonymous guest record (`user_id: null`, `show_watermark: true`), falling
+ * back cleanly when Supabase env vars are missing or unreachable.
  */
 export async function persistAiQrRecord(
   input: PersistAiQrInput,
@@ -127,17 +128,22 @@ export async function persistAiQrRecord(
 
   try {
     const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    const userId = user?.id ?? null;
+
     const { data: qrRow, error: qrError } = await supabase
       .from("qr_codes")
       .insert({
         short_code: shortCode,
-        user_id: null,
+        user_id: userId,
         title: input.title,
         description: input.description,
         category: input.category,
         type: input.type,
         config_json: input.configJson,
-        show_watermark: true,
+        show_watermark: !userId,
       })
       .select("id, short_code")
       .single();
