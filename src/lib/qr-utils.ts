@@ -81,24 +81,39 @@ export function getQrScanUrl(shortCode: string, origin?: string): string {
   return resolvedOrigin ? `${resolvedOrigin}/q/${shortCode}` : `/q/${shortCode}`;
 }
 
+let cachedRecordsRaw: string | null = null;
+let cachedRecordsMap: Record<string, QrCodeRow> = {};
+
 function readLocalRecords(): Record<string, QrCodeRow> {
-  if (typeof window === "undefined") return {};
+  if (typeof window === "undefined") return cachedRecordsMap;
   try {
     const raw = window.localStorage.getItem(LOCAL_STORAGE_KEY);
-    if (!raw) return {};
-    return JSON.parse(raw) as Record<string, QrCodeRow>;
+    if (!raw) {
+      cachedRecordsRaw = null;
+      cachedRecordsMap = {};
+      return cachedRecordsMap;
+    }
+    if (raw === cachedRecordsRaw) {
+      return cachedRecordsMap;
+    }
+    cachedRecordsRaw = raw;
+    cachedRecordsMap = JSON.parse(raw) as Record<string, QrCodeRow>;
+    return cachedRecordsMap;
   } catch {
-    return {};
+    return cachedRecordsMap;
   }
 }
 
 export function saveLocalQrRecord(record: QrCodeRow): void {
   if (typeof window === "undefined") return;
   try {
-    const existing = readLocalRecords();
+    const existing = { ...readLocalRecords() };
     existing[record.short_code] = record;
     existing[record.id] = record;
-    window.localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(existing));
+    const serialized = JSON.stringify(existing);
+    cachedRecordsRaw = serialized;
+    cachedRecordsMap = existing;
+    window.localStorage.setItem(LOCAL_STORAGE_KEY, serialized);
   } catch {
     // Ignore storage quota or privacy-mode errors.
   }
@@ -109,14 +124,27 @@ export function getLocalQrRecord(idOrShortCode: string): QrCodeRow | null {
   return records[idOrShortCode] ?? null;
 }
 
+let cachedStepsRaw: string | null = null;
+let cachedStepsMap: Record<string, SopStepRow[]> = {};
+const EMPTY_STEPS: SopStepRow[] = [];
+
 function readLocalStepsMap(): Record<string, SopStepRow[]> {
-  if (typeof window === "undefined") return {};
+  if (typeof window === "undefined") return cachedStepsMap;
   try {
     const raw = window.localStorage.getItem(LOCAL_STEPS_STORAGE_KEY);
-    if (!raw) return {};
-    return JSON.parse(raw) as Record<string, SopStepRow[]>;
+    if (!raw) {
+      cachedStepsRaw = null;
+      cachedStepsMap = {};
+      return cachedStepsMap;
+    }
+    if (raw === cachedStepsRaw) {
+      return cachedStepsMap;
+    }
+    cachedStepsRaw = raw;
+    cachedStepsMap = JSON.parse(raw) as Record<string, SopStepRow[]>;
+    return cachedStepsMap;
   } catch {
-    return {};
+    return cachedStepsMap;
   }
 }
 
@@ -126,14 +154,14 @@ export function saveLocalSopSteps(
 ): void {
   if (typeof window === "undefined") return;
   try {
-    const existing = readLocalStepsMap();
+    const existing = { ...readLocalStepsMap() };
     for (const key of keys) {
       if (key) existing[key] = steps;
     }
-    window.localStorage.setItem(
-      LOCAL_STEPS_STORAGE_KEY,
-      JSON.stringify(existing),
-    );
+    const serialized = JSON.stringify(existing);
+    cachedStepsRaw = serialized;
+    cachedStepsMap = existing;
+    window.localStorage.setItem(LOCAL_STEPS_STORAGE_KEY, serialized);
   } catch {
     // Ignore storage quota or privacy-mode errors.
   }
@@ -141,7 +169,7 @@ export function saveLocalSopSteps(
 
 export function getLocalSopSteps(idOrShortCode: string): SopStepRow[] {
   const map = readLocalStepsMap();
-  return map[idOrShortCode] ?? [];
+  return map[idOrShortCode] ?? EMPTY_STEPS;
 }
 
 export interface LocalInspectionLogEntry extends InspectionLogInsert {

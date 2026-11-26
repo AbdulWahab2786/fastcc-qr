@@ -71,12 +71,13 @@ export function StudioClient({
 
   const record = initialRecord ?? localRecord ?? getDemoQrRecord(routeId);
   const isLocalFallback = !initialRecord;
+  const safeShortCode = record.short_code || routeId || "demo";
 
   const [preset, setPreset] = useState<StudioLayoutPreset>("equipment-plate");
   const [headerTitleOverride, setHeaderTitleOverride] = useState<string | null>(
     null,
   );
-  const headerTitle = headerTitleOverride ?? record.title;
+  const headerTitle = headerTitleOverride ?? (record.title || "Operations SOP");
   const [subtitle, setSubtitle] = useState<string>(
     "Scan for Hindi/English Steps",
   );
@@ -94,7 +95,7 @@ export function StudioClient({
         ? customLogoDataUrl
         : null;
 
-  const scanUrl = getQrScanUrl(record.short_code);
+  const scanUrl = getQrScanUrl(safeShortCode);
 
   function handleLogoUpload(e: ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];

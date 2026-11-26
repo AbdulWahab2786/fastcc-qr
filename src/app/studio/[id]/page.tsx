@@ -8,15 +8,24 @@ interface StudioPageProps {
   params: Promise<{ id: string }>;
 }
 
-async function loadQrRecord(id: string): Promise<QrCodeRow | null> {
-  if (!hasSupabaseEnv()) return null;
+function normalizeRouteId(rawId: string): string {
+  try {
+    return decodeURIComponent(rawId).trim();
+  } catch {
+    return rawId.trim();
+  }
+}
+
+async function loadQrRecord(rawId: string): Promise<QrCodeRow | null> {
+  const cleanId = normalizeRouteId(rawId);
+  if (!cleanId || !hasSupabaseEnv()) return null;
 
   try {
     const supabase = await createClient();
     const query = supabase.from("qr_codes").select("*");
-    const { data, error } = isUuid(id)
-      ? await query.eq("id", id).maybeSingle()
-      : await query.eq("short_code", id).maybeSingle();
+    const { data, error } = isUuid(cleanId)
+      ? await query.eq("id", cleanId).maybeSingle()
+      : await query.eq("short_code", cleanId).maybeSingle();
 
     if (error || !data) return null;
     return data;
@@ -27,12 +36,13 @@ async function loadQrRecord(id: string): Promise<QrCodeRow | null> {
 
 async function StudioContent({ params }: StudioPageProps) {
   const { id } = await params;
+  const cleanId = normalizeRouteId(id);
   const supabaseConfigured = hasSupabaseEnv();
-  const initialRecord = await loadQrRecord(id);
+  const initialRecord = await loadQrRecord(cleanId);
 
   return (
     <StudioClient
-      routeId={id}
+      routeId={cleanId}
       initialRecord={initialRecord}
       supabaseConfigured={supabaseConfigured}
     />

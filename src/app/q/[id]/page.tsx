@@ -8,20 +8,29 @@ interface WorkerQrPageProps {
   params: Promise<{ id: string }>;
 }
 
-async function loadWorkerQrData(id: string): Promise<{
+function normalizeRouteId(rawId: string): string {
+  try {
+    return decodeURIComponent(rawId).trim();
+  } catch {
+    return rawId.trim();
+  }
+}
+
+async function loadWorkerQrData(rawId: string): Promise<{
   record: QrCodeRow | null;
   steps: SopStepRow[];
 }> {
-  if (!hasSupabaseEnv()) {
+  const cleanId = normalizeRouteId(rawId);
+  if (!cleanId || !hasSupabaseEnv()) {
     return { record: null, steps: [] };
   }
 
   try {
     const supabase = await createClient();
     const query = supabase.from("qr_codes").select("*");
-    const { data: qrRow, error: qrError } = isUuid(id)
-      ? await query.eq("id", id).maybeSingle()
-      : await query.eq("short_code", id).maybeSingle();
+    const { data: qrRow, error: qrError } = isUuid(cleanId)
+      ? await query.eq("id", cleanId).maybeSingle()
+      : await query.eq("short_code", cleanId).maybeSingle();
 
     if (qrError || !qrRow) {
       return { record: null, steps: [] };
@@ -44,12 +53,13 @@ async function loadWorkerQrData(id: string): Promise<{
 
 async function WorkerQrContent({ params }: WorkerQrPageProps) {
   const { id } = await params;
+  const cleanId = normalizeRouteId(id);
   const supabaseConfigured = hasSupabaseEnv();
-  const { record, steps } = await loadWorkerQrData(id);
+  const { record, steps } = await loadWorkerQrData(cleanId);
 
   return (
     <WorkerScanClient
-      routeId={id}
+      routeId={cleanId}
       initialRecord={record}
       initialSteps={steps}
       supabaseConfigured={supabaseConfigured}
