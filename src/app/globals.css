@@ -1,0 +1,66 @@
+@import "tailwindcss";
+
+@theme {
+  --color-surface: #ffffff;
+  --color-canvas: #f8fafc;
+  --color-canvas-muted: #f1f5f9;
+  --color-border: #e2e8f0;
+  --color-ink: #0f172a;
+  --color-ink-muted: #475569;
+  --color-action-green: #16a34a;
+  --color-utility-blue: #2563eb;
+  --color-alert-red: #dc2626;
+}
+
+@theme inline {
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+body {
+  background-color: var(--color-canvas);
+  color: var(--color-ink);
+  font-family: var(--font-sans), system-ui, -apple-system, sans-serif;
+}
+
+@media print {
+  @page {
+    margin: 8mm;
+  }
+
+  html,
+  body {
+    background: #ffffff !important;
+    color: #0f172a !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .no-print {
+    display: none !important;
+  }
+
+  #printable-sticker {
+    margin: 0 auto !important;
+    box-shadow: none !important;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  #printable-sticker[data-preset="a4-poster"] {
+    width: 190mm !important;
+    min-height: 270mm !important;
+  }
+
+  #printable-sticker[data-preset="equipment-plate"] {
+    width: 150mm !important;
+    min-height: 112mm !important;
+  }
+
+  #printable-sticker[data-preset="thermal-sticker"] {
+    width: 58mm !important;
+    min-height: 86mm !important;
+  }
+}
