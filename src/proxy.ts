@@ -11,26 +11,31 @@ export async function proxy(request: NextRequest) {
     return supabaseResponse;
   }
 
-  const { url, publishableKey } = getSupabaseEnv();
+  try {
+    const { url, publishableKey } = getSupabaseEnv();
 
-  const supabase = createServerClient<Database>(url, publishableKey, {
-    cookies: {
-      getAll() {
-        return request.cookies.getAll();
+    const supabase = createServerClient<Database>(url, publishableKey, {
+      cookies: {
+        getAll() {
+          return request.cookies.getAll();
+        },
+        setAll(cookiesToSet) {
+          cookiesToSet.forEach(({ name, value }) =>
+            request.cookies.set(name, value),
+          );
+          supabaseResponse = NextResponse.next({ request });
+          cookiesToSet.forEach(({ name, value, options }) =>
+            supabaseResponse.cookies.set(name, value, options),
+          );
+        },
       },
-      setAll(cookiesToSet) {
-        cookiesToSet.forEach(({ name, value }) =>
-          request.cookies.set(name, value),
-        );
-        supabaseResponse = NextResponse.next({ request });
-        cookiesToSet.forEach(({ name, value, options }) =>
-          supabaseResponse.cookies.set(name, value, options),
-        );
-      },
-    },
-  });
+    });
 
-  await supabase.auth.getClaims();
+    await supabase.auth.getClaims();
+  } catch {
+    // Never fail incoming page requests if Supabase session refresh errors.
+    return NextResponse.next({ request });
+  }
 
   return supabaseResponse;
 }
