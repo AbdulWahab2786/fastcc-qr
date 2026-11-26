@@ -26,6 +26,7 @@ import {
   createGuestQrCode,
   getQrScanUrl,
   saveLocalQrRecord,
+  saveLocalSopSteps,
   TEMPLATE_PRESETS,
   type TemplatePreset,
 } from "@/lib/qr-utils";
@@ -196,6 +197,21 @@ export function HomeWorkbench() {
           created_at: now,
           updated_at: now,
         });
+
+        saveLocalSopSteps(
+          [videoResult.short_code, videoResult.id],
+          videoResult.steps.map((step) => ({
+            id: `${videoResult.id}-step-${step.step_number}`,
+            qr_code_id: videoResult.id,
+            step_order: step.step_number,
+            title: step.title,
+            instruction: step.description,
+            is_critical: false,
+            timestamp_sec: step.timestamp_sec,
+            translations_json: step.translations_json as unknown as Json,
+            created_at: now,
+          })),
+        );
 
         setPreview({
           shortCode: videoResult.short_code,
