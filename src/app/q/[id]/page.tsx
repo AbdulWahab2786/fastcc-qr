@@ -36,6 +36,14 @@ async function loadWorkerQrData(rawId: string): Promise<{
       return { record: null, steps: [] };
     }
 
+    try {
+      await supabase.rpc("increment_qr_scan", {
+        p_short_code: qrRow.short_code,
+      });
+    } catch {
+      // Never block frontline worker view if scan tracking RPC fails.
+    }
+
     const { data: stepRows, error: stepsError } = await supabase
       .from("sop_steps")
       .select("*")

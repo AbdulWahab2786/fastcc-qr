@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type DragEvent, type ChangeEvent } from "react";
+import { useEffect, useState, type DragEvent, type ChangeEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -16,12 +16,15 @@ import {
   AlertCircle,
   ArrowRight,
   Loader2,
+  Lock,
   Package,
   Wrench,
   Tag,
   Users,
 } from "lucide-react";
 import { QrCodePreview } from "@/components/QrCodePreview";
+import { createClient } from "@/lib/supabase/client";
+import { hasSupabaseEnv } from "@/lib/supabase/env";
 import {
   createGuestQrCode,
   getQrScanUrl,
@@ -74,6 +77,25 @@ export function HomeWorkbench() {
   const [isAiProcessing, setIsAiProcessing] = useState(false);
   const [aiStatusMessage, setAiStatusMessage] = useState<string | null>(null);
   const [aiErrorMessage, setAiErrorMessage] = useState<string | null>(null);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [aiAuthRequired, setAiAuthRequired] = useState(false);
+
+  useEffect(() => {
+    if (!hasSupabaseEnv()) return;
+    let active = true;
+    const supabase = createClient();
+    supabase.auth
+      .getUser()
+      .then(({ data: { user } }) => {
+        if (active) setIsAuthenticated(Boolean(user));
+      })
+      .catch(() => {
+        if (active) setIsAuthenticated(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   // Generation & Preview state
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -127,7 +149,27 @@ export function HomeWorkbench() {
     const selectedFile = mode === "video" ? videoFile : paperFile;
     setAiStatusMessage(null);
     setAiErrorMessage(null);
+    setAiAuthRequired(false);
     setBannerNotice(null);
+
+    let authed = isAuthenticated;
+    if (!authed && hasSupabaseEnv()) {
+      try {
+        const supabase = createClient();
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+        authed = Boolean(user);
+        setIsAuthenticated(authed);
+      } catch {
+        authed = false;
+      }
+    }
+
+    if (!authed) {
+      setAiAuthRequired(true);
+      return;
+    }
 
     if (!selectedFile) {
       setAiErrorMessage(
@@ -168,6 +210,13 @@ export function HomeWorkbench() {
         | (PaperFormApiResponse & { error?: undefined })
         | { error: string };
 
+      if (response.status === 401) {
+        setIsAuthenticated(false);
+        setAiAuthRequired(true);
+        setAiStatusMessage(null);
+        return;
+      }
+
       if (!response.ok || "error" in body) {
         const message =
           "error" in body && body.error
@@ -195,6 +244,8 @@ export function HomeWorkbench() {
             languages: [aiLanguage],
           } as unknown as Json,
           show_watermark: true,
+          scan_count: 0,
+          last_scanned_at: null,
           created_at: now,
           updated_at: now,
         });
@@ -242,6 +293,8 @@ export function HomeWorkbench() {
             languages: [aiLanguage],
           } as unknown as Json,
           show_watermark: true,
+          scan_count: 0,
+          last_scanned_at: null,
           created_at: now,
           updated_at: now,
         });
@@ -366,7 +419,7 @@ export function HomeWorkbench() {
                       setActiveTab(tab.id);
                       setAiStatusMessage(null);
                       setAiErrorMessage(null);
-    setAiErrorMessage(null);
+                      setAiAuthRequired(false);
                     }}
                     className={`flex items-center justify-center gap-1.5 border-b-2 px-3 py-3 text-xs font-medium transition-colors sm:text-sm ${
                       isActive
@@ -566,6 +619,25 @@ export function HomeWorkbench() {
                         ).toFixed(2)}{" "}
                         MB
                       </span>
+                    </div>
+                  ) : null}
+
+                  {aiAuthRequired ? (
+                    <div className="flex flex-col gap-3 rounded-lg border border-utility-blue/30 bg-utility-blue/5 p-4 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="flex items-start gap-2.5 text-xs text-ink">
+                        <Lock className="mt-0.5 h-4 w-4 shrink-0 text-utility-blue" />
+                        <span>
+                          Sign in for free to generate AI SOPs and save them to
+                          your dashboard.
+                        </span>
+                      </div>
+                      <Link
+                        href="/login"
+                        className="inline-flex min-h-10 shrink-0 items-center justify-center gap-1.5 rounded-lg bg-ink px-4 text-xs font-semibold text-white transition-opacity hover:opacity-90"
+                      >
+                        Sign In for Free
+                        <ArrowRight className="h-3.5 w-3.5" />
+                      </Link>
                     </div>
                   ) : null}
 

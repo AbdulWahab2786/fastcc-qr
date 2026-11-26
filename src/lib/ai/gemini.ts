@@ -88,6 +88,26 @@ export function parseGeminiJson(rawText: string | undefined): unknown {
   return JSON.parse(cleaned) as unknown;
 }
 
+/**
+ * Returns the authenticated Supabase user for server route handlers, or null
+ * when unauthenticated or when Supabase env vars are not configured.
+ */
+export async function requireAuthenticatedUser() {
+  if (!hasSupabaseEnv()) return null;
+
+  try {
+    const supabase = await createClient();
+    const {
+      data: { user },
+      error,
+    } = await supabase.auth.getUser();
+    if (error || !user) return null;
+    return user;
+  } catch {
+    return null;
+  }
+}
+
 export interface PersistAiQrInput {
   type: "video_sop" | "paper_form";
   category: string;

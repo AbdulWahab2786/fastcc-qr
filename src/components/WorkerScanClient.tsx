@@ -176,6 +176,38 @@ function getSafeExternalUrl(raw: string | null | undefined): string | null {
   return null;
 }
 
+async function uploadInspectionPhoto(
+  supabase: ReturnType<typeof createClient>,
+  shortCode: string,
+  file: File,
+): Promise<string | null> {
+  try {
+    const rawExt = file.name.split(".").pop() ?? "jpg";
+    const safeExt = rawExt.replace(/[^a-zA-Z0-9]/g, "") || "jpg";
+    const fileId =
+      typeof crypto !== "undefined" && crypto.randomUUID
+        ? crypto.randomUUID()
+        : `${Date.now()}`;
+    const storagePath = `${shortCode}/${Date.now()}-${fileId}.${safeExt}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from("inspection-photos")
+      .upload(storagePath, file, {
+        cacheControl: "3600",
+        upsert: false,
+      });
+
+    if (uploadError) return null;
+
+    const { data: publicUrlData } = supabase.storage
+      .from("inspection-photos")
+      .getPublicUrl(storagePath);
+    return publicUrlData.publicUrl || null;
+  } catch {
+    return null;
+  }
+}
+
 export function WorkerScanClient({
   routeId,
   initialRecord,
@@ -230,6 +262,7 @@ export function WorkerScanClient({
   const [workerName, setWorkerName] = useState("");
   const [notes, setNotes] = useState("");
   const [proofPhotoName, setProofPhotoName] = useState<string | null>(null);
+  const [proofPhotoFile, setProofPhotoFile] = useState<File | null>(null);
   const [proofPhotoPreview, setProofPhotoPreview] = useState<string | null>(
     null,
   );
@@ -251,6 +284,7 @@ export function WorkerScanClient({
     const file = e.target.files?.[0];
     if (!file) return;
     setProofPhotoName(file.name);
+    setProofPhotoFile(file);
     const reader = new FileReader();
     reader.onload = () => {
       if (typeof reader.result === "string") {
@@ -337,11 +371,20 @@ export function WorkerScanClient({
     if (!savedLocally) {
       try {
         const supabase = createClient();
+        const uploadedPhotoUrl = proofPhotoFile
+          ? await uploadInspectionPhoto(
+              supabase,
+              record.short_code,
+              proofPhotoFile,
+            )
+          : null;
+
         const { error } = await supabase.from("inspection_logs").insert({
           qr_code_id: record.id,
           inspector_name: trimmedName,
           status,
           notes: notes.trim() || null,
+          ...(uploadedPhotoUrl ? { photo_url: uploadedPhotoUrl } : {}),
           step_results: stepResultsPayload,
         });
         if (error) {
@@ -380,6 +423,7 @@ export function WorkerScanClient({
     setFieldPhotoNames({});
     setNotes("");
     setProofPhotoName(null);
+    setProofPhotoFile(null);
     setProofPhotoPreview(null);
     setSubmitError(null);
   }

@@ -4,6 +4,7 @@ import { useState, useSyncExternalStore, type ChangeEvent } from "react";
 import Link from "next/link";
 import {
   ArrowLeft,
+  ArrowRight,
   Download,
   Printer,
   Copy,
@@ -12,6 +13,7 @@ import {
   ExternalLink,
   AlertCircle,
   LayoutTemplate,
+  Lock,
 } from "lucide-react";
 import { QrCodePreview } from "@/components/QrCodePreview";
 import {
@@ -30,6 +32,7 @@ interface StudioClientProps {
   routeId: string;
   initialRecord: QrCodeRow | null;
   supabaseConfigured: boolean;
+  isAuthenticated: boolean;
 }
 
 type LogoMode = "fastcc" | "custom" | "none";
@@ -62,6 +65,7 @@ export function StudioClient({
   routeId,
   initialRecord,
   supabaseConfigured,
+  isAuthenticated,
 }: StudioClientProps) {
   const localRecord = useSyncExternalStore(
     subscribeNoop,
@@ -87,6 +91,7 @@ export function StudioClient({
   );
   const [copied, setCopied] = useState(false);
   const [exporting, setExporting] = useState<"png" | "svg" | null>(null);
+  const [showLogoAuthPrompt, setShowLogoAuthPrompt] = useState(false);
 
   const activeLogoSrc =
     logoMode === "fastcc"
@@ -231,6 +236,26 @@ export function StudioClient({
         </div>
       </div>
 
+      {/* Guest Mode Banner */}
+      {!isAuthenticated ? (
+        <div className="no-print mb-5 flex flex-col gap-3 rounded-lg border border-utility-blue/30 bg-utility-blue/5 px-4 py-3 text-xs text-ink sm:flex-row sm:items-center sm:justify-between print:hidden">
+          <div className="flex items-center gap-2.5">
+            <Lock className="h-4 w-4 shrink-0 text-utility-blue" />
+            <span>
+              Guest Mode — Sign in to save this QR permanently, upload a custom
+              logo, and track scans.
+            </span>
+          </div>
+          <Link
+            href="/login"
+            className="inline-flex min-h-9 w-fit shrink-0 items-center justify-center gap-1.5 rounded-lg bg-ink px-3.5 text-xs font-semibold text-white transition-opacity hover:opacity-90"
+          >
+            Sign In
+            <ArrowRight className="h-3.5 w-3.5" />
+          </Link>
+        </div>
+      ) : null}
+
       {/* Subtle Fallback Banner */}
       {isLocalFallback ? (
         <div className="no-print mb-5 flex items-center gap-2.5 rounded-lg border border-border bg-surface px-4 py-2.5 text-xs text-ink-muted print:hidden">
@@ -349,23 +374,45 @@ export function StudioClient({
               >
                 No Logo
               </button>
-              <label
-                className={`flex cursor-pointer items-center justify-center gap-1 rounded-lg border px-2.5 py-2 text-xs font-medium transition-colors ${
-                  logoMode === "custom"
-                    ? "border-utility-blue bg-utility-blue/5 text-ink"
-                    : "border-border text-ink-muted hover:text-ink"
-                }`}
-              >
-                <ImagePlus className="h-3.5 w-3.5" />
-                Upload
-                <input
-                  type="file"
-                  accept="image/*"
-                  onChange={handleLogoUpload}
-                  className="sr-only"
-                />
-              </label>
+              {isAuthenticated ? (
+                <label
+                  className={`flex cursor-pointer items-center justify-center gap-1 rounded-lg border px-2.5 py-2 text-xs font-medium transition-colors ${
+                    logoMode === "custom"
+                      ? "border-utility-blue bg-utility-blue/5 text-ink"
+                      : "border-border text-ink-muted hover:text-ink"
+                  }`}
+                >
+                  <ImagePlus className="h-3.5 w-3.5" />
+                  Upload
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={handleLogoUpload}
+                    className="sr-only"
+                  />
+                </label>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setShowLogoAuthPrompt(true)}
+                  className="flex items-center justify-center gap-1 rounded-lg border border-border bg-canvas-muted/60 px-2.5 py-2 text-xs font-medium text-ink-muted transition-colors hover:border-utility-blue/50 hover:text-ink"
+                >
+                  <Lock className="h-3.5 w-3.5 text-utility-blue" />
+                  Upload
+                </button>
+              )}
             </div>
+            {!isAuthenticated && showLogoAuthPrompt ? (
+              <div className="flex items-center justify-between gap-2 rounded-lg border border-utility-blue/30 bg-utility-blue/5 px-3 py-2 text-xs text-ink">
+                <span>Sign in to upload a custom logo.</span>
+                <Link
+                  href="/login"
+                  className="shrink-0 font-semibold text-utility-blue hover:underline"
+                >
+                  Sign In
+                </Link>
+              </div>
+            ) : null}
           </section>
 
           {/* Export Controls */}

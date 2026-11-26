@@ -40,11 +40,25 @@ async function StudioContent({ params }: StudioPageProps) {
   const supabaseConfigured = hasSupabaseEnv();
   const initialRecord = await loadQrRecord(cleanId);
 
+  let isAuthenticated = false;
+  if (supabaseConfigured) {
+    try {
+      const supabase = await createClient();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      isAuthenticated = Boolean(user);
+    } catch {
+      isAuthenticated = false;
+    }
+  }
+
   return (
     <StudioClient
       routeId={cleanId}
       initialRecord={initialRecord}
       supabaseConfigured={supabaseConfigured}
+      isAuthenticated={isAuthenticated}
     />
   );
 }

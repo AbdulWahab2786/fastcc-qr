@@ -6,6 +6,7 @@ import {
   parseGeminiJson,
   parseLanguagesField,
   persistAiQrRecord,
+  requireAuthenticatedUser,
 } from "@/lib/ai/gemini";
 import type { Json } from "@/types/database";
 import type {
@@ -121,6 +122,17 @@ function normalizePaperFormOutput(parsed: unknown): {
 }
 
 export async function POST(request: Request) {
+  const user = await requireAuthenticatedUser();
+  if (!user) {
+    return NextResponse.json(
+      {
+        error:
+          "Sign in for free to generate AI SOPs and save them to your dashboard.",
+      },
+      { status: 401 },
+    );
+  }
+
   let formData: FormData;
   try {
     formData = await request.formData();

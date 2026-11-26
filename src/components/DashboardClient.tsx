@@ -13,6 +13,7 @@ import {
   Plus,
   Printer,
   QrCode,
+  ScanLine,
   Sparkles,
   Trash2,
 } from "lucide-react";
@@ -125,6 +126,11 @@ export function DashboardClient({
     [qrCodes],
   );
 
+  const totalScans = useMemo(
+    () => qrCodes.reduce((sum, qr) => sum + (qr.scan_count ?? 0), 0),
+    [qrCodes],
+  );
+
   async function handleCopyLink(shortCode: string) {
     const url = getQrScanUrl(shortCode);
     try {
@@ -173,6 +179,7 @@ export function DashboardClient({
       "Short Code",
       "Status",
       "Notes",
+      "Photo URL",
       "Submitted At",
     ];
 
@@ -184,6 +191,7 @@ export function DashboardClient({
         qr?.short_code ?? "",
         log.status,
         log.notes ?? "",
+        log.photo_url ?? "",
         log.created_at,
       ]
         .map((cell) => escapeCsvCell(String(cell)))
@@ -246,7 +254,7 @@ export function DashboardClient({
       {/* Top KPI Cards */}
       <section
         aria-label="Key metrics"
-        className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-3"
+        className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4"
       >
         <div className="rounded-xl border border-border bg-surface p-5">
           <div className="flex items-center justify-between text-ink-muted">
@@ -257,6 +265,18 @@ export function DashboardClient({
           </div>
           <p className="mt-2 font-mono text-3xl font-semibold text-ink">
             {qrCodes.length}
+          </p>
+        </div>
+
+        <div className="rounded-xl border border-border bg-surface p-5">
+          <div className="flex items-center justify-between text-ink-muted">
+            <span className="text-xs font-medium uppercase tracking-wider">
+              Total Scans
+            </span>
+            <ScanLine className="h-4 w-4 text-action-green" />
+          </div>
+          <p className="mt-2 font-mono text-3xl font-semibold text-ink">
+            {totalScans}
           </p>
         </div>
 
@@ -326,6 +346,7 @@ export function DashboardClient({
                     <th className="px-4 py-3">Title</th>
                     <th className="px-4 py-3">Type</th>
                     <th className="px-4 py-3">Short Code</th>
+                    <th className="px-4 py-3">Scans</th>
                     <th className="px-4 py-3">Created</th>
                     <th className="px-4 py-3 text-right">Actions</th>
                   </tr>
@@ -352,6 +373,9 @@ export function DashboardClient({
                         </td>
                         <td className="px-4 py-3.5 whitespace-nowrap font-mono text-xs text-ink">
                           {qr.short_code}
+                        </td>
+                        <td className="px-4 py-3.5 whitespace-nowrap font-mono text-xs font-semibold text-ink">
+                          {qr.scan_count ?? 0}
                         </td>
                         <td className="px-4 py-3.5 whitespace-nowrap text-xs text-ink-muted">
                           {formatDate(qr.created_at)}
@@ -499,6 +523,22 @@ export function DashboardClient({
                                 No notes
                               </span>
                             )}
+                            {log.photo_url ? (
+                              <a
+                                href={log.photo_url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1.5 rounded-md border border-border bg-canvas px-2 py-1 text-xs font-medium text-utility-blue transition-colors hover:bg-canvas-muted"
+                              >
+                                {/* eslint-disable-next-line @next/next/no-img-element */}
+                                <img
+                                  src={log.photo_url}
+                                  alt={`Inspection proof by ${log.inspector_name}`}
+                                  className="h-5 w-5 rounded object-cover"
+                                />
+                                <span>View Photo</span>
+                              </a>
+                            ) : null}
                           </div>
                         </td>
                         <td className="px-4 py-3.5 whitespace-nowrap font-mono text-xs text-ink-muted">

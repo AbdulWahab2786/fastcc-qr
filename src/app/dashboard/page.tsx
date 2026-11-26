@@ -56,7 +56,8 @@ export default function DashboardPage() {
       fallback={
         <main className="mx-auto max-w-6xl px-4 py-8 sm:px-6 sm:py-10">
           <div className="mb-6 h-10 w-64 animate-pulse rounded-lg bg-canvas-muted" />
-          <div className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-3">
+          <div className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="h-28 animate-pulse rounded-xl border border-border bg-surface" />
             <div className="h-28 animate-pulse rounded-xl border border-border bg-surface" />
             <div className="h-28 animate-pulse rounded-xl border border-border bg-surface" />
             <div className="h-28 animate-pulse rounded-xl border border-border bg-surface" />

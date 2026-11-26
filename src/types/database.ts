@@ -22,6 +22,8 @@ export interface Database {
           type: string;
           config_json: Json;
           show_watermark: boolean;
+          scan_count: number;
+          last_scanned_at: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -35,6 +37,8 @@ export interface Database {
           type?: string;
           config_json?: Json;
           show_watermark?: boolean;
+          scan_count?: number;
+          last_scanned_at?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -48,6 +52,8 @@ export interface Database {
           type?: string;
           config_json?: Json;
           show_watermark?: boolean;
+          scan_count?: number;
+          last_scanned_at?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -104,6 +110,7 @@ export interface Database {
           inspector_name: string;
           status: InspectionStatus;
           notes: string | null;
+          photo_url: string | null;
           step_results: Json;
           created_at: string;
         };
@@ -113,6 +120,7 @@ export interface Database {
           inspector_name: string;
           status: InspectionStatus;
           notes?: string | null;
+          photo_url?: string | null;
           step_results?: Json;
           created_at?: string;
         };
@@ -122,6 +130,7 @@ export interface Database {
           inspector_name?: string;
           status?: InspectionStatus;
           notes?: string | null;
+          photo_url?: string | null;
           step_results?: Json;
           created_at?: string;
         };
@@ -137,7 +146,14 @@ export interface Database {
       };
     };
     Views: Record<string, never>;
-    Functions: Record<string, never>;
+    Functions: {
+      increment_qr_scan: {
+        Args: {
+          p_short_code: string;
+        };
+        Returns: undefined;
+      };
+    };
     Enums: Record<string, never>;
     CompositeTypes: Record<string, never>;
   };
