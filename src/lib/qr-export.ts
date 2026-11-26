@@ -282,15 +282,43 @@ export async function downloadStickerPng(
     },
   });
 
+  const watermarkBand = config.showWatermark
+    ? config.preset === "a4-poster"
+      ? 34
+      : 26
+    : 0;
   const qrX = Math.round((w - qrSize) / 2);
   const qrY =
     config.preset === "a4-poster"
-      ? Math.round((h - qrSize) / 2) + 20
+      ? Math.round((h - qrSize - watermarkBand) / 2) + 20
       : config.preset === "equipment-plate"
-        ? cursorY + 24
-        : cursorY + 32;
+        ? cursorY + 20
+        : cursorY + 28;
 
+  // Tight white quiet-zone/border box enclosing QR matrix + anti-crop watermark
+  ctx.save();
+  ctx.fillStyle = "#FFFFFF";
+  drawRoundedRect(ctx, qrX, qrY, qrSize, qrSize + watermarkBand, 14);
+  ctx.fill();
+  ctx.clip();
   ctx.drawImage(qrCanvas, qrX, qrY);
+
+  if (config.showWatermark) {
+    ctx.fillStyle = "#475569";
+    ctx.font = `600 ${config.preset === "a4-poster" ? 20 : 16}px system-ui, -apple-system, sans-serif`;
+    ctx.textAlign = "center";
+    ctx.fillText(
+      "Powered by FastCC QR",
+      w / 2,
+      qrY + qrSize + (config.preset === "a4-poster" ? 16 : 12),
+    );
+  }
+  ctx.restore();
+
+  ctx.strokeStyle = "#E2E8F0";
+  ctx.lineWidth = 2;
+  drawRoundedRect(ctx, qrX, qrY, qrSize, qrSize + watermarkBand, 14);
+  ctx.stroke();
 
   // Logo overlay in center of QR
   if (config.logoSrc) {
@@ -326,17 +354,12 @@ export async function downloadStickerPng(
   }
 
   // Short code pill
-  const idY = qrY + qrSize + (config.preset === "a4-poster" ? 72 : 48);
+  const idY =
+    qrY + qrSize + watermarkBand + (config.preset === "a4-poster" ? 60 : 42);
   ctx.fillStyle = "#0F172A";
   ctx.font = `700 ${config.preset === "a4-poster" ? 30 : 22}px ui-monospace, monospace`;
+  ctx.textAlign = "center";
   ctx.fillText(`ID: ${config.shortCode}`, w / 2, idY);
-
-  // Watermark footer
-  if (config.showWatermark) {
-    ctx.fillStyle = "#64748B";
-    ctx.font = `500 ${config.preset === "a4-poster" ? 24 : 18}px system-ui, -apple-system, sans-serif`;
-    ctx.fillText("Powered by FastCC QR", w / 2, h - framePad - 32);
-  }
 
   const blob = await new Promise<Blob | null>((resolve) =>
     canvas.toBlob((b) => resolve(b), "image/png"),
@@ -396,8 +419,9 @@ export async function downloadStickerSvg(
     config.preset === "equipment-plate" ? "#0F172A" : "#CBD5E1";
   const strokeWidth = config.preset === "equipment-plate" ? 4 : 2;
 
+  const watermarkBand = config.showWatermark ? 20 : 0;
   const watermarkSvg = config.showWatermark
-    ? `<text x="${w / 2}" y="${h - framePad - 20}" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="14" font-weight="500" fill="#64748B">Powered by FastCC QR</text>`
+    ? `<text x="${w / 2}" y="${qrY + qrSize + 10}" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="11" font-weight="600" fill="#475569">Powered by FastCC QR</text>`
     : "";
 
   const svg = `<?xml version="1.0" encoding="UTF-8"?>
@@ -406,11 +430,12 @@ export async function downloadStickerSvg(
   <rect x="${framePad}" y="${framePad}" width="${w - framePad * 2}" height="${h - framePad * 2}" rx="16" fill="#FFFFFF" stroke="${strokeColor}" stroke-width="${strokeWidth}"/>
   <text x="${w / 2}" y="${framePad + 76}" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="${titleSize}" font-weight="700" fill="#0F172A">${escapeXml(config.title || "Operations SOP")}</text>
   <text x="${w / 2}" y="${framePad + 114}" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="${subSize}" font-weight="500" fill="#475569">${escapeXml(config.subtitle || "Scan for step-by-step instructions")}</text>
+  <rect x="${qrX}" y="${qrY}" width="${qrSize}" height="${qrSize + watermarkBand}" rx="10" fill="#FFFFFF" stroke="#E2E8F0" stroke-width="1.5"/>
   <svg x="${qrX}" y="${qrY}" width="${qrSize}" height="${qrSize}" viewBox="${qrViewBox}">
     ${qrInner}
   </svg>
-  <text x="${w / 2}" y="${qrY + qrSize + 38}" text-anchor="middle" font-family="ui-monospace, monospace" font-size="18" font-weight="700" fill="#0F172A">ID: ${escapeXml(config.shortCode)}</text>
   ${watermarkSvg}
+  <text x="${w / 2}" y="${qrY + qrSize + watermarkBand + 32}" text-anchor="middle" font-family="ui-monospace, monospace" font-size="18" font-weight="700" fill="#0F172A">ID: ${escapeXml(config.shortCode)}</text>
 </svg>`;
 
   const blob = new Blob([svg], { type: "image/svg+xml;charset=utf-8" });

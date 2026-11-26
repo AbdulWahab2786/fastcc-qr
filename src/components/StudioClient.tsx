@@ -93,8 +93,9 @@ export function StudioClient({
   const [exporting, setExporting] = useState<"png" | "svg" | null>(null);
   const [showLogoAuthPrompt, setShowLogoAuthPrompt] = useState(false);
 
-  const activeLogoSrc =
-    logoMode === "fastcc"
+  const activeLogoSrc = !isAuthenticated
+    ? "/logo.png"
+    : logoMode === "fastcc"
       ? "/logo.png"
       : logoMode === "custom"
         ? customLogoDataUrl
@@ -363,17 +364,28 @@ export function StudioClient({
               >
                 FastCC Logo
               </button>
-              <button
-                type="button"
-                onClick={() => setLogoMode("none")}
-                className={`rounded-lg border px-2.5 py-2 text-xs font-medium transition-colors ${
-                  logoMode === "none"
-                    ? "border-utility-blue bg-utility-blue/5 text-ink"
-                    : "border-border text-ink-muted hover:text-ink"
-                }`}
-              >
-                No Logo
-              </button>
+              {isAuthenticated ? (
+                <button
+                  type="button"
+                  onClick={() => setLogoMode("none")}
+                  className={`rounded-lg border px-2.5 py-2 text-xs font-medium transition-colors ${
+                    logoMode === "none"
+                      ? "border-utility-blue bg-utility-blue/5 text-ink"
+                      : "border-border text-ink-muted hover:text-ink"
+                  }`}
+                >
+                  No Logo
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setShowLogoAuthPrompt(true)}
+                  className="flex items-center justify-center gap-1 rounded-lg border border-border bg-canvas-muted/60 px-2.5 py-2 text-xs font-medium text-ink-muted transition-colors hover:border-utility-blue/50 hover:text-ink"
+                >
+                  <Lock className="h-3.5 w-3.5 text-utility-blue" />
+                  No Logo
+                </button>
+              )}
               {isAuthenticated ? (
                 <label
                   className={`flex cursor-pointer items-center justify-center gap-1 rounded-lg border px-2.5 py-2 text-xs font-medium transition-colors ${
@@ -404,7 +416,9 @@ export function StudioClient({
             </div>
             {!isAuthenticated && showLogoAuthPrompt ? (
               <div className="flex items-center justify-between gap-2 rounded-lg border border-utility-blue/30 bg-utility-blue/5 px-3 py-2 text-xs text-ink">
-                <span>Sign in to upload a custom logo.</span>
+                <span>
+                  Sign in to remove the FastCC logo or upload a custom logo.
+                </span>
                 <Link
                   href="/login"
                   className="shrink-0 font-semibold text-utility-blue hover:underline"
@@ -489,27 +503,25 @@ export function StudioClient({
               </div>
             )}
 
-            {/* High-ECC QR Code with Optional Center Logo */}
+            {/* High-ECC QR Code with Optional Center Logo & Tight Anti-Crop Watermark */}
             <div className="my-2 flex flex-col items-center">
               <QrCodePreview
                 value={scanUrl}
                 size={qrSizeByPreset[preset]}
                 logoSrc={activeLogoSrc}
+                showWatermark={record.show_watermark}
               />
               <div className="mt-3 inline-flex items-center gap-1.5 rounded border border-border bg-canvas-muted px-2.5 py-1 font-mono text-xs font-semibold text-ink">
                 ID: {record.short_code}
               </div>
             </div>
 
-            {/* Watermark Footer */}
-            <div className="w-full pt-2">
-              {record.show_watermark ? (
-                <p className="text-[11px] font-medium text-ink-muted">
-                  Powered by FastCC QR
-                </p>
-              ) : (
-                <span className="sr-only">Watermark disabled</span>
-              )}
+            <div className="w-full pt-1">
+              <span className="sr-only">
+                {record.show_watermark
+                  ? "Powered by FastCC QR"
+                  : "Watermark disabled"}
+              </span>
             </div>
           </div>
         </section>

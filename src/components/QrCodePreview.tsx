@@ -7,6 +7,7 @@ interface QrCodePreviewProps {
   value: string;
   size?: number;
   logoSrc?: string | null;
+  showWatermark?: boolean;
   className?: string;
 }
 
@@ -15,6 +16,7 @@ export function QrCodePreview({
   value,
   size = 240,
   logoSrc = null,
+  showWatermark = false,
   className = "",
 }: QrCodePreviewProps) {
   const [dataUrl, setDataUrl] = useState<string>("");
@@ -44,32 +46,42 @@ export function QrCodePreview({
 
   return (
     <div
-      className={`relative inline-flex items-center justify-center overflow-hidden rounded-lg border border-border bg-white ${className}`}
-      style={{ width: size, height: size }}
+      className={`inline-flex flex-col items-center overflow-hidden rounded-lg border border-border bg-white ${className}`}
     >
-      {dataUrl ? (
-        /* eslint-disable-next-line @next/next/no-img-element */
-        <img
-          src={dataUrl}
-          alt={`QR code for ${value}`}
-          width={size}
-          height={size}
-          className="h-full w-full object-contain"
-        />
-      ) : (
-        <div className="h-full w-full animate-pulse bg-canvas-muted" />
-      )}
+      <div
+        className="relative flex items-center justify-center"
+        style={{ width: size, height: size }}
+      >
+        {dataUrl ? (
+          /* eslint-disable-next-line @next/next/no-img-element */
+          <img
+            src={dataUrl}
+            alt={`QR code for ${value}`}
+            width={size}
+            height={size}
+            className="h-full w-full object-contain"
+          />
+        ) : (
+          <div className="h-full w-full animate-pulse bg-canvas-muted" />
+        )}
 
-      {logoSrc ? (
-        <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-          <div className="flex h-[22%] w-[22%] items-center justify-center rounded-md border border-border bg-white p-1">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={logoSrc}
-              alt="QR center logo"
-              className="h-full w-full rounded-sm object-contain"
-            />
+        {logoSrc ? (
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+            <div className="flex h-[22%] w-[22%] items-center justify-center rounded-md border border-border bg-white p-1">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={logoSrc}
+                alt="QR center logo"
+                className="h-full w-full rounded-sm object-contain"
+              />
+            </div>
           </div>
+        ) : null}
+      </div>
+
+      {showWatermark ? (
+        <div className="w-full px-2 pb-1.5 text-center text-[10px] font-semibold leading-none tracking-tight text-ink-muted">
+          Powered by FastCC QR
         </div>
       ) : null}
     </div>
