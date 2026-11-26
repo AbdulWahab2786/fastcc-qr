@@ -1,3 +1,8 @@
+import {
+  FREE_QR_LIMIT,
+  isPaidPlan,
+  resolveEffectivePlan,
+} from "@/lib/billing/constants";
 import { createClient } from "@/lib/supabase/client";
 import { hasSupabaseEnv } from "@/lib/supabase/env";
 import type { Json } from "@/types/database";
@@ -211,16 +216,17 @@ export interface CreateGuestQrInput {
 }
 
 export interface CreateGuestQrResult {
-  record: QrCodeRow;
+  record: QrCodeRow | null;
   isLocalFallback: boolean;
+  blockedByPlanLimit?: boolean;
   notice?: string;
 }
 
 /**
- * Inserts a QR record into Supabase. Links `user_id` and disables the
- * watermark when the caller is authenticated; otherwise inserts an anonymous
- * guest record (`user_id: null`, `show_watermark: true`).
- * Falls back to a local record if Supabase env vars are not configured or insert fails.
+ * Inserts a QR record into Supabase. Links `user_id` when authenticated and enforces
+ * Free-tier limits (10 QRs max, watermark locked ON). Unlocks watermark removal only
+ * on active Pro / Business plans.
+ * Falls back to a local record if Supabase env vars are not configured or unreachable.
  */
 export async function createGuestQrCode(
   input: CreateGuestQrInput,
@@ -268,6 +274,42 @@ export async function createGuestQrCode(
     } = await supabase.auth.getUser();
     const userId = user?.id ?? null;
 
+    let showWatermark = true;
+    if (userId) {
+      let effectivePlan = resolveEffectivePlan("free", null);
+      const { data: planRow } = await supabase
+        .from("user_plans")
+        .select("plan, plan_expires_at")
+        .eq("user_id", userId)
+        .maybeSingle();
+
+      if (planRow) {
+        effectivePlan = resolveEffectivePlan(
+          planRow.plan,
+          planRow.plan_expires_at,
+        );
+      }
+
+      const paid = isPaidPlan(effectivePlan);
+      showWatermark = !paid;
+
+      if (!paid) {
+        const { count, error: countError } = await supabase
+          .from("qr_codes")
+          .select("id", { count: "exact", head: true })
+          .eq("user_id", userId);
+
+        if (!countError && (count ?? 0) >= FREE_QR_LIMIT) {
+          return {
+            record: null,
+            isLocalFallback: false,
+            blockedByPlanLimit: true,
+            notice: `Free plan limit reached (${FREE_QR_LIMIT}/${FREE_QR_LIMIT} QR codes). Upgrade to Pro for unlimited QR codes.`,
+          };
+        }
+      }
+    }
+
     const { data, error } = await supabase
       .from("qr_codes")
       .insert({
@@ -277,12 +319,23 @@ export async function createGuestQrCode(
         description,
         category,
         type,
-        show_watermark: !userId,
+        show_watermark: showWatermark,
       })
       .select()
       .single();
 
     if (error || !data) {
+      if (
+        userId &&
+        error?.message?.toLowerCase().includes("row-level security")
+      ) {
+        return {
+          record: null,
+          isLocalFallback: false,
+          blockedByPlanLimit: true,
+          notice: `Free plan limit reached (${FREE_QR_LIMIT}/${FREE_QR_LIMIT} QR codes). Upgrade to Pro for unlimited QR codes.`,
+        };
+      }
       saveLocalQrRecord(localFallbackRecord);
       return {
         record: localFallbackRecord,

@@ -50,6 +50,11 @@ export function Footer() {
                   Worker View
                 </Link>
               </li>
+              <li>
+                <Link href="/pricing" className="hover:text-ink hover:underline">
+                  Pricing
+                </Link>
+              </li>
             </ul>
           </div>
 

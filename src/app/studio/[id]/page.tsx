@@ -1,7 +1,9 @@
 import { Suspense } from "react";
 import { StudioClient } from "@/components/StudioClient";
+import { getUserPlanStatus } from "@/lib/billing/plans";
 import { hasSupabaseEnv } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
+import type { PlanTier } from "@/types/database";
 import { isUuid, type QrCodeRow } from "@/types/qr";
 
 interface StudioPageProps {
@@ -41,15 +43,24 @@ async function StudioContent({ params }: StudioPageProps) {
   const initialRecord = await loadQrRecord(cleanId);
 
   let isAuthenticated = false;
+  let userPlan: PlanTier | null = null;
+  let currentUserId: string | null = null;
   if (supabaseConfigured) {
     try {
       const supabase = await createClient();
       const {
         data: { user },
       } = await supabase.auth.getUser();
-      isAuthenticated = Boolean(user);
+      if (user) {
+        isAuthenticated = true;
+        currentUserId = user.id;
+        const planStatus = await getUserPlanStatus(supabase, user.id);
+        userPlan = planStatus.effectivePlan;
+      }
     } catch {
       isAuthenticated = false;
+      userPlan = null;
+      currentUserId = null;
     }
   }
 
@@ -59,6 +70,8 @@ async function StudioContent({ params }: StudioPageProps) {
       initialRecord={initialRecord}
       supabaseConfigured={supabaseConfigured}
       isAuthenticated={isAuthenticated}
+      userPlan={userPlan}
+      currentUserId={currentUserId}
     />
   );
 }

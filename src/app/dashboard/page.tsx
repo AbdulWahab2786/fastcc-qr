@@ -1,14 +1,21 @@
 import { Suspense } from "react";
 import { redirect } from "next/navigation";
 import { DashboardClient } from "@/components/DashboardClient";
+import { getUserPlanStatus } from "@/lib/billing/plans";
 import { hasSupabaseEnv } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
 import type { InspectionLogRow, QrCodeRow } from "@/types/qr";
 
-async function DashboardContent() {
+interface DashboardPageProps {
+  searchParams: Promise<{ upgraded?: string }>;
+}
+
+async function DashboardContent({ searchParams }: DashboardPageProps) {
   if (!hasSupabaseEnv()) {
     redirect("/login");
   }
+
+  const { upgraded } = await searchParams;
 
   const supabase = await createClient();
   const {
@@ -20,11 +27,14 @@ async function DashboardContent() {
     redirect("/login");
   }
 
-  const { data: qrRows } = await supabase
-    .from("qr_codes")
-    .select("*")
-    .eq("user_id", user.id)
-    .order("created_at", { ascending: false });
+  const [planStatus, { data: qrRows }] = await Promise.all([
+    getUserPlanStatus(supabase, user.id),
+    supabase
+      .from("qr_codes")
+      .select("*")
+      .eq("user_id", user.id)
+      .order("created_at", { ascending: false }),
+  ]);
 
   const qrCodes: QrCodeRow[] = qrRows ?? [];
   const qrIds = qrCodes.map((qr) => qr.id);
@@ -46,11 +56,15 @@ async function DashboardContent() {
       userEmail={user.email ?? ""}
       initialQrCodes={qrCodes}
       initialLogs={logs}
+      plan={planStatus.effectivePlan}
+      aiSopsUsed={planStatus.aiSopsUsed}
+      planExpiresAt={planStatus.planExpiresAt}
+      justUpgraded={upgraded === "true"}
     />
   );
 }
 
-export default function DashboardPage() {
+export default function DashboardPage({ searchParams }: DashboardPageProps) {
   return (
     <Suspense
       fallback={
@@ -66,7 +80,7 @@ export default function DashboardPage() {
         </main>
       }
     >
-      <DashboardContent />
+      <DashboardContent searchParams={searchParams} />
     </Suspense>
   );
 }

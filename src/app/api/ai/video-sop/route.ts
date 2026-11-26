@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createPartFromUri, FileState, Type, type Schema } from "@google/genai";
 import {
+  enforceAiRequestGuard,
   GEMINI_MODEL,
   getGeminiClient,
   parseGeminiJson,
@@ -8,6 +9,8 @@ import {
   persistAiQrRecord,
   requireAuthenticatedUser,
 } from "@/lib/ai/gemini";
+import { isPaidPlan } from "@/lib/billing/constants";
+import { incrementUserAiSopsUsed } from "@/lib/billing/plans";
 import type { Json } from "@/types/database";
 import type {
   StepTranslation,
@@ -183,6 +186,23 @@ export async function POST(request: Request) {
     );
   }
 
+  const guard = await enforceAiRequestGuard(user.id);
+  if (!guard.allowed) {
+    return NextResponse.json(
+      {
+        error: guard.error,
+        code: guard.code,
+        upgradeRequired: Boolean(guard.upgradeRequired),
+      },
+      {
+        status: guard.status,
+        headers: guard.retryAfterSec
+          ? { "Retry-After": String(guard.retryAfterSec) }
+          : undefined,
+      },
+    );
+  }
+
   let formData: FormData;
   try {
     formData = await request.formData();
@@ -313,7 +333,10 @@ export async function POST(request: Request) {
       description: normalized.summary,
       configJson,
       steps: normalized.steps,
+      showWatermark: !isPaidPlan(guard.planStatus.effectivePlan),
     });
+
+    await incrementUserAiSopsUsed(guard.supabase, user.id);
 
     const payload: VideoSopApiResponse = {
       short_code: persisted.short_code,
@@ -322,6 +345,7 @@ export async function POST(request: Request) {
       summary: normalized.summary,
       steps: normalized.steps,
       checklist: normalized.checklist,
+      show_watermark: persisted.show_watermark,
       isLocalFallback: persisted.isLocalFallback,
       notice: persisted.notice,
     };

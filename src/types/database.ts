@@ -7,6 +7,7 @@ export type Json =
   | Json[];
 
 export type InspectionStatus = "pass" | "fail" | "issue";
+export type PlanTier = "free" | "pro" | "business";
 
 export interface Database {
   public: {
@@ -144,6 +145,36 @@ export interface Database {
           },
         ];
       };
+      user_plans: {
+        Row: {
+          user_id: string;
+          plan: PlanTier;
+          ai_sops_used: number;
+          razorpay_order_id: string | null;
+          razorpay_payment_id: string | null;
+          plan_expires_at: string | null;
+          updated_at: string;
+        };
+        Insert: {
+          user_id: string;
+          plan?: PlanTier;
+          ai_sops_used?: number;
+          razorpay_order_id?: string | null;
+          razorpay_payment_id?: string | null;
+          plan_expires_at?: string | null;
+          updated_at?: string;
+        };
+        Update: {
+          user_id?: string;
+          plan?: PlanTier;
+          ai_sops_used?: number;
+          razorpay_order_id?: string | null;
+          razorpay_payment_id?: string | null;
+          plan_expires_at?: string | null;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
     };
     Views: Record<string, never>;
     Functions: {
@@ -152,6 +183,45 @@ export interface Database {
           p_short_code: string;
         };
         Returns: undefined;
+      };
+      ensure_user_plan: {
+        Args: Record<string, never>;
+        Returns: {
+          user_id: string;
+          plan: PlanTier;
+          ai_sops_used: number;
+          razorpay_order_id: string | null;
+          razorpay_payment_id: string | null;
+          plan_expires_at: string | null;
+          updated_at: string;
+        };
+      };
+      get_effective_user_plan: {
+        Args: {
+          p_user_id: string;
+        };
+        Returns: PlanTier;
+      };
+      increment_ai_sops_used: {
+        Args: Record<string, never>;
+        Returns: number;
+      };
+      apply_verified_razorpay_plan: {
+        Args: {
+          p_plan: string;
+          p_order_id: string;
+          p_payment_id: string;
+          p_expires_at: string;
+        };
+        Returns: {
+          user_id: string;
+          plan: PlanTier;
+          ai_sops_used: number;
+          razorpay_order_id: string | null;
+          razorpay_payment_id: string | null;
+          plan_expires_at: string | null;
+          updated_at: string;
+        };
       };
     };
     Enums: Record<string, never>;

@@ -4,7 +4,22 @@ import { LoginForm } from "@/components/LoginForm";
 import { hasSupabaseEnv } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
 
-async function LoginGate() {
+interface LoginPageProps {
+  searchParams: Promise<{ next?: string }>;
+}
+
+function getSafeNextPath(rawNext: string | undefined): string {
+  if (!rawNext) return "/dashboard";
+  if (rawNext.startsWith("/") && !rawNext.startsWith("//")) {
+    return rawNext;
+  }
+  return "/dashboard";
+}
+
+async function LoginGate({ searchParams }: LoginPageProps) {
+  const { next } = await searchParams;
+  const nextPath = getSafeNextPath(next);
+
   if (hasSupabaseEnv()) {
     let isAuthenticated = false;
     try {
@@ -18,14 +33,14 @@ async function LoginGate() {
     }
 
     if (isAuthenticated) {
-      redirect("/dashboard");
+      redirect(nextPath);
     }
   }
 
-  return <LoginForm />;
+  return <LoginForm nextPath={nextPath} />;
 }
 
-export default function LoginPage() {
+export default function LoginPage({ searchParams }: LoginPageProps) {
   return (
     <main className="mx-auto flex min-h-[calc(100vh-8rem)] max-w-6xl items-center justify-center px-4 py-12 sm:px-6">
       <Suspense
@@ -33,7 +48,7 @@ export default function LoginPage() {
           <div className="h-96 w-full max-w-md animate-pulse rounded-xl border border-border bg-surface" />
         }
       >
-        <LoginGate />
+        <LoginGate searchParams={searchParams} />
       </Suspense>
     </main>
   );

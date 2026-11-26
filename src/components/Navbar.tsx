@@ -81,6 +81,12 @@ export function Navbar() {
             Studio
           </Link>
           <Link
+            href="/pricing"
+            className="rounded-md px-3 py-1.5 text-sm font-medium text-ink-muted transition-colors hover:bg-canvas-muted hover:text-ink"
+          >
+            Pricing
+          </Link>
+          <Link
             href="/#compare"
             className="hidden rounded-md px-3 py-1.5 text-sm font-medium text-ink-muted transition-colors hover:bg-canvas-muted hover:text-ink md:inline-flex"
           >

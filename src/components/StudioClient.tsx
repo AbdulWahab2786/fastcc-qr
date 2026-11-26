@@ -16,6 +16,7 @@ import {
   Lock,
 } from "lucide-react";
 import { QrCodePreview } from "@/components/QrCodePreview";
+import { isPaidPlan } from "@/lib/billing/constants";
 import {
   downloadStickerPng,
   downloadStickerSvg,
@@ -26,6 +27,8 @@ import {
   getLocalQrRecord,
   getQrScanUrl,
 } from "@/lib/qr-utils";
+import { createClient } from "@/lib/supabase/client";
+import type { PlanTier } from "@/types/database";
 import type { QrCodeRow } from "@/types/qr";
 
 interface StudioClientProps {
@@ -33,6 +36,8 @@ interface StudioClientProps {
   initialRecord: QrCodeRow | null;
   supabaseConfigured: boolean;
   isAuthenticated: boolean;
+  userPlan: PlanTier | null;
+  currentUserId: string | null;
 }
 
 type LogoMode = "fastcc" | "custom" | "none";
@@ -66,6 +71,8 @@ export function StudioClient({
   initialRecord,
   supabaseConfigured,
   isAuthenticated,
+  userPlan,
+  currentUserId,
 }: StudioClientProps) {
   const localRecord = useSyncExternalStore(
     subscribeNoop,
@@ -76,6 +83,13 @@ export function StudioClient({
   const record = initialRecord ?? localRecord ?? getDemoQrRecord(routeId);
   const isLocalFallback = !initialRecord;
   const safeShortCode = record.short_code || routeId || "demo";
+  const isPaidUser = userPlan !== null && isPaidPlan(userPlan);
+  const isOwner = Boolean(
+    currentUserId &&
+      record.user_id &&
+      currentUserId === record.user_id &&
+      !isLocalFallback,
+  );
 
   const [preset, setPreset] = useState<StudioLayoutPreset>("equipment-plate");
   const [headerTitleOverride, setHeaderTitleOverride] = useState<string | null>(
@@ -89,11 +103,19 @@ export function StudioClient({
   const [customLogoDataUrl, setCustomLogoDataUrl] = useState<string | null>(
     null,
   );
+  const [watermarkOverride, setWatermarkOverride] = useState<boolean | null>(
+    null,
+  );
+  const [savingWatermark, setSavingWatermark] = useState(false);
   const [copied, setCopied] = useState(false);
   const [exporting, setExporting] = useState<"png" | "svg" | null>(null);
-  const [showLogoAuthPrompt, setShowLogoAuthPrompt] = useState(false);
+  const [showProPrompt, setShowProPrompt] = useState(false);
 
-  const activeLogoSrc = !isAuthenticated
+  const effectiveWatermark = isPaidUser
+    ? (watermarkOverride ?? record.show_watermark)
+    : true;
+
+  const activeLogoSrc = !isPaidUser
     ? "/fastcc-logo.png"
     : logoMode === "fastcc"
       ? "/fastcc-logo.png"
@@ -102,6 +124,29 @@ export function StudioClient({
         : null;
 
   const scanUrl = getQrScanUrl(safeShortCode);
+
+  async function handleToggleWatermark() {
+    if (!isPaidUser) {
+      setShowProPrompt(true);
+      return;
+    }
+
+    const nextValue = !effectiveWatermark;
+    setWatermarkOverride(nextValue);
+
+    if (isOwner && supabaseConfigured) {
+      setSavingWatermark(true);
+      try {
+        const supabase = createClient();
+        await supabase
+          .from("qr_codes")
+          .update({ show_watermark: nextValue })
+          .eq("id", record.id);
+      } finally {
+        setSavingWatermark(false);
+      }
+    }
+  }
 
   function handleLogoUpload(e: ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -137,7 +182,7 @@ export function StudioClient({
           subtitle,
           preset,
           logoSrc: activeLogoSrc,
-          showWatermark: record.show_watermark,
+          showWatermark: effectiveWatermark,
         },
         `fastcc-label-${record.short_code}-${preset}.png`,
       );
@@ -157,7 +202,7 @@ export function StudioClient({
           subtitle,
           preset,
           logoSrc: activeLogoSrc,
-          showWatermark: record.show_watermark,
+          showWatermark: effectiveWatermark,
         },
         `fastcc-label-${record.short_code}-${preset}.svg`,
       );
@@ -347,11 +392,22 @@ export function StudioClient({
             </div>
           </section>
 
-          {/* Logo Overlay */}
+          {/* Logo Overlay & Watermark */}
           <section className="rounded-xl border border-border bg-surface p-5 space-y-3">
-            <h2 className="text-sm font-semibold text-ink">
-              Center Logo Overlay (ECC Level H)
-            </h2>
+            <div className="flex items-center justify-between gap-2">
+              <h2 className="text-sm font-semibold text-ink">
+                Center Logo Overlay (ECC Level H)
+              </h2>
+              {!isPaidUser ? (
+                <Link
+                  href="/pricing"
+                  className="inline-flex items-center gap-1 rounded border border-action-green/30 bg-action-green/10 px-2 py-0.5 font-mono text-[10px] font-semibold uppercase text-action-green hover:bg-action-green/15"
+                >
+                  <Lock className="h-3 w-3" />
+                  Pro
+                </Link>
+              ) : null}
+            </div>
             <div className="grid grid-cols-3 gap-2">
               <button
                 type="button"
@@ -364,7 +420,7 @@ export function StudioClient({
               >
                 FastCC Logo
               </button>
-              {isAuthenticated ? (
+              {isPaidUser ? (
                 <button
                   type="button"
                   onClick={() => setLogoMode("none")}
@@ -379,14 +435,14 @@ export function StudioClient({
               ) : (
                 <button
                   type="button"
-                  onClick={() => setShowLogoAuthPrompt(true)}
+                  onClick={() => setShowProPrompt(true)}
                   className="flex items-center justify-center gap-1 rounded-lg border border-border bg-canvas-muted/60 px-2.5 py-2 text-xs font-medium text-ink-muted transition-colors hover:border-utility-blue/50 hover:text-ink"
                 >
                   <Lock className="h-3.5 w-3.5 text-utility-blue" />
                   No Logo
                 </button>
               )}
-              {isAuthenticated ? (
+              {isPaidUser ? (
                 <label
                   className={`flex cursor-pointer items-center justify-center gap-1 rounded-lg border px-2.5 py-2 text-xs font-medium transition-colors ${
                     logoMode === "custom"
@@ -406,7 +462,7 @@ export function StudioClient({
               ) : (
                 <button
                   type="button"
-                  onClick={() => setShowLogoAuthPrompt(true)}
+                  onClick={() => setShowProPrompt(true)}
                   className="flex items-center justify-center gap-1 rounded-lg border border-border bg-canvas-muted/60 px-2.5 py-2 text-xs font-medium text-ink-muted transition-colors hover:border-utility-blue/50 hover:text-ink"
                 >
                   <Lock className="h-3.5 w-3.5 text-utility-blue" />
@@ -414,16 +470,60 @@ export function StudioClient({
                 </button>
               )}
             </div>
-            {!isAuthenticated && showLogoAuthPrompt ? (
+
+            <div className="flex items-center justify-between gap-3 rounded-lg border border-border bg-canvas px-3 py-2.5">
+              <div>
+                <p className="text-xs font-semibold text-ink">
+                  FastCC Sticker Watermark
+                </p>
+                <p className="text-[11px] text-ink-muted">
+                  {isPaidUser
+                    ? effectiveWatermark
+                      ? "Shown below QR matrix"
+                      : "Removed for clean white-label print"
+                    : "Locked ON for Free plan"}
+                </p>
+              </div>
+              {isPaidUser ? (
+                <button
+                  type="button"
+                  disabled={savingWatermark}
+                  onClick={handleToggleWatermark}
+                  className={`rounded-md border px-2.5 py-1 text-xs font-semibold transition-colors ${
+                    effectiveWatermark
+                      ? "border-border bg-surface text-ink hover:bg-canvas-muted"
+                      : "border-action-green/30 bg-action-green/10 text-action-green hover:bg-action-green/15"
+                  }`}
+                >
+                  {savingWatermark
+                    ? "Saving..."
+                    : effectiveWatermark
+                      ? "Remove"
+                      : "Removed"}
+                </button>
+              ) : (
+                <Link
+                  href="/pricing"
+                  className="inline-flex items-center gap-1 rounded-md border border-action-green/30 bg-action-green/10 px-2.5 py-1 text-xs font-semibold text-action-green hover:bg-action-green/15"
+                >
+                  <Lock className="h-3 w-3" />
+                  Pro
+                </Link>
+              )}
+            </div>
+
+            {!isPaidUser && showProPrompt ? (
               <div className="flex items-center justify-between gap-2 rounded-lg border border-utility-blue/30 bg-utility-blue/5 px-3 py-2 text-xs text-ink">
                 <span>
-                  Sign in to remove the FastCC logo or upload a custom logo.
+                  {isAuthenticated
+                    ? "Upgrade to Pro to remove the FastCC watermark or upload a custom logo."
+                    : "Sign in and upgrade to Pro to remove the FastCC logo & watermark."}
                 </span>
                 <Link
-                  href="/login"
+                  href="/pricing"
                   className="shrink-0 font-semibold text-utility-blue hover:underline"
                 >
-                  Sign In
+                  Upgrade
                 </Link>
               </div>
             ) : null}
@@ -509,7 +609,7 @@ export function StudioClient({
                 value={scanUrl}
                 size={qrSizeByPreset[preset]}
                 logoSrc={activeLogoSrc}
-                showWatermark={record.show_watermark}
+                showWatermark={effectiveWatermark}
               />
               <div className="mt-3 inline-flex items-center gap-1.5 rounded border border-border bg-canvas-muted px-2.5 py-1 font-mono text-xs font-semibold text-ink">
                 ID: {record.short_code}
@@ -518,7 +618,7 @@ export function StudioClient({
 
             <div className="w-full pt-1">
               <span className="sr-only">
-                {record.show_watermark
+                {effectiveWatermark
                   ? "Powered by FastCC QR"
                   : "Watermark disabled"}
               </span>

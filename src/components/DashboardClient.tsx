@@ -5,11 +5,14 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   AlertCircle,
+  ArrowRight,
   Check,
+  CheckCircle2,
   ClipboardCheck,
   Copy,
   Download,
   ExternalLink,
+  Lock,
   Plus,
   Printer,
   QrCode,
@@ -17,14 +20,25 @@ import {
   Sparkles,
   Trash2,
 } from "lucide-react";
+import {
+  FREE_QR_LIMIT,
+  getAiSopLimit,
+  isPaidPlan,
+  PLAN_SPECS,
+} from "@/lib/billing/constants";
 import { createClient } from "@/lib/supabase/client";
 import { getQrScanUrl } from "@/lib/qr-utils";
+import type { PlanTier } from "@/types/database";
 import type { InspectionLogRow, QrCodeRow } from "@/types/qr";
 
 interface DashboardClientProps {
   userEmail: string;
   initialQrCodes: QrCodeRow[];
   initialLogs: InspectionLogRow[];
+  plan: PlanTier;
+  aiSopsUsed: number;
+  planExpiresAt: string | null;
+  justUpgraded: boolean;
 }
 
 const TYPE_LABELS: Record<string, string> = {
@@ -102,6 +116,10 @@ export function DashboardClient({
   userEmail,
   initialQrCodes,
   initialLogs,
+  plan,
+  aiSopsUsed,
+  planExpiresAt,
+  justUpgraded,
 }: DashboardClientProps) {
   const router = useRouter();
   const [qrCodes, setQrCodes] = useState<QrCodeRow[]>(initialQrCodes);
@@ -109,6 +127,11 @@ export function DashboardClient({
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [errorBanner, setErrorBanner] = useState<string | null>(null);
+  const [csvUpgradePrompt, setCsvUpgradePrompt] = useState(false);
+
+  const isPaid = isPaidPlan(plan);
+  const planSpec = PLAN_SPECS[plan];
+  const aiLimit = getAiSopLimit(plan);
 
   const qrLookup = useMemo(() => {
     const map = new Map<string, QrCodeRow>();
@@ -171,6 +194,11 @@ export function DashboardClient({
   }
 
   function handleExportCsv() {
+    if (!isPaid) {
+      setCsvUpgradePrompt(true);
+      return;
+    }
+
     if (logs.length === 0) return;
 
     const header = [
@@ -217,10 +245,24 @@ export function DashboardClient({
       {/* Header */}
       <div className="mb-6 flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
         <div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <span className="inline-flex items-center rounded-md border border-border bg-canvas-muted px-2 py-0.5 font-mono text-[11px] font-medium text-ink-muted">
               MANAGER CONSOLE
             </span>
+            <span
+              className={`inline-flex items-center rounded-md border px-2 py-0.5 font-mono text-[11px] font-semibold uppercase ${
+                isPaid
+                  ? "border-action-green/30 bg-action-green/10 text-action-green"
+                  : "border-border bg-surface text-ink"
+              }`}
+            >
+              {planSpec.name} Plan
+            </span>
+            {planExpiresAt && isPaid ? (
+              <span className="font-mono text-[11px] text-ink-muted">
+                Renews {formatDate(planExpiresAt)}
+              </span>
+            ) : null}
             {userEmail ? (
               <span className="font-mono text-xs text-ink-muted">
                 {userEmail}
@@ -232,14 +274,38 @@ export function DashboardClient({
           </h1>
         </div>
 
-        <Link
-          href="/"
-          className="inline-flex w-fit items-center gap-2 rounded-lg bg-action-green px-4 py-2.5 text-sm font-medium text-white transition-opacity hover:opacity-95"
-        >
-          <Plus className="h-4 w-4" />
-          <span>New QR / SOP</span>
-        </Link>
+        <div className="flex flex-wrap items-center gap-2.5">
+          {!isPaid ? (
+            <Link
+              href="/pricing"
+              className="inline-flex w-fit items-center gap-1.5 rounded-lg border border-utility-blue/30 bg-utility-blue/10 px-3.5 py-2.5 text-sm font-semibold text-utility-blue transition-colors hover:bg-utility-blue/15"
+            >
+              <Sparkles className="h-4 w-4" />
+              <span>Upgrade</span>
+            </Link>
+          ) : null}
+          <Link
+            href="/"
+            className="inline-flex w-fit items-center gap-2 rounded-lg bg-action-green px-4 py-2.5 text-sm font-medium text-white transition-opacity hover:opacity-95"
+          >
+            <Plus className="h-4 w-4" />
+            <span>New QR / SOP</span>
+          </Link>
+        </div>
       </div>
+
+      {justUpgraded ? (
+        <div
+          role="status"
+          className="mb-6 flex items-center gap-2.5 rounded-lg border border-action-green/30 bg-action-green/10 px-4 py-3 text-xs font-medium text-action-green"
+        >
+          <CheckCircle2 className="h-4 w-4 shrink-0" />
+          <span>
+            Welcome to FastCC QR {planSpec.name}! Unlimited QR codes, watermark
+            removal, custom logos, and CSV export are now active.
+          </span>
+        </div>
+      ) : null}
 
       {errorBanner ? (
         <div
@@ -265,6 +331,11 @@ export function DashboardClient({
           </div>
           <p className="mt-2 font-mono text-3xl font-semibold text-ink">
             {qrCodes.length}
+            {!isPaid ? (
+              <span className="ml-1.5 text-sm font-normal text-ink-muted">
+                / {FREE_QR_LIMIT}
+              </span>
+            ) : null}
           </p>
         </div>
 
@@ -301,6 +372,11 @@ export function DashboardClient({
           </div>
           <p className="mt-2 font-mono text-3xl font-semibold text-ink">
             {activeAiCount}
+            <span className="ml-2 text-xs font-normal text-ink-muted">
+              {aiLimit === null
+                ? `(${aiSopsUsed} used • Unlimited)`
+                : `(${aiSopsUsed}/${aiLimit} AI quota)`}
+            </span>
           </p>
         </div>
       </section>
@@ -457,13 +533,44 @@ export function DashboardClient({
           <button
             type="button"
             onClick={handleExportCsv}
-            disabled={logs.length === 0}
+            disabled={isPaid && logs.length === 0}
             className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-2 text-xs font-medium text-ink transition-colors hover:bg-canvas-muted disabled:cursor-not-allowed disabled:opacity-50"
           >
-            <Download className="h-3.5 w-3.5 text-utility-blue" />
+            {isPaid ? (
+              <Download className="h-3.5 w-3.5 text-utility-blue" />
+            ) : (
+              <Lock className="h-3.5 w-3.5 text-utility-blue" />
+            )}
             <span>Export CSV</span>
+            {!isPaid ? (
+              <span className="rounded bg-action-green/10 px-1.5 py-0.5 font-mono text-[10px] font-semibold uppercase text-action-green">
+                Pro
+              </span>
+            ) : null}
           </button>
         </div>
+
+        {csvUpgradePrompt && !isPaid ? (
+          <div
+            role="alert"
+            className="mb-4 flex flex-col gap-3 rounded-lg border border-utility-blue/30 bg-utility-blue/5 px-4 py-3 text-xs text-ink sm:flex-row sm:items-center sm:justify-between"
+          >
+            <div className="flex items-center gap-2">
+              <Lock className="h-4 w-4 shrink-0 text-utility-blue" />
+              <span>
+                CSV Inspection Log export is available on Pro (₹999/mo) and
+                Business plans.
+              </span>
+            </div>
+            <Link
+              href="/pricing"
+              className="inline-flex w-fit shrink-0 items-center gap-1.5 rounded-lg bg-action-green px-3.5 py-1.5 text-xs font-semibold text-white transition-opacity hover:opacity-95"
+            >
+              Upgrade to Pro
+              <ArrowRight className="h-3.5 w-3.5" />
+            </Link>
+          </div>
+        ) : null}
 
         {logs.length === 0 ? (
           <div className="rounded-xl border border-border bg-surface p-8 text-center">

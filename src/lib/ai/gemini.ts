@@ -1,4 +1,7 @@
 import { GoogleGenAI } from "@google/genai";
+import { getAiSopLimit, getQrLimit } from "@/lib/billing/constants";
+import { getUserPlanStatus, type UserPlanStatus } from "@/lib/billing/plans";
+import { checkAiRateLimit } from "@/lib/billing/rate-limit";
 import { generateShortCode } from "@/lib/qr-utils";
 import { hasSupabaseEnv } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
@@ -108,6 +111,81 @@ export async function requireAuthenticatedUser() {
   }
 }
 
+export type AiRequestGuardResult =
+  | {
+      allowed: true;
+      supabase: Awaited<ReturnType<typeof createClient>>;
+      planStatus: UserPlanStatus;
+    }
+  | {
+      allowed: false;
+      status: 402 | 429;
+      error: string;
+      code: "RATE_LIMITED" | "AI_LIMIT_REACHED" | "QR_LIMIT_REACHED";
+      upgradeRequired?: boolean;
+      retryAfterSec?: number;
+    };
+
+/**
+ * Enforces per-user rate limiting (5 req / 10 min) and plan quotas
+ * (AI SOP trial/monthly limits + Free 10 QR code limit) before calling Gemini.
+ */
+export async function enforceAiRequestGuard(
+  userId: string,
+): Promise<AiRequestGuardResult> {
+  const rate = checkAiRateLimit(userId);
+  if (!rate.allowed) {
+    return {
+      allowed: false,
+      status: 429,
+      code: "RATE_LIMITED",
+      retryAfterSec: rate.retryAfterSec,
+      error: `Too many AI requests. Wait ${rate.retryAfterSec}s before trying again (max 5 requests per 10 minutes).`,
+    };
+  }
+
+  const supabase = await createClient();
+  const planStatus = await getUserPlanStatus(supabase, userId);
+
+  const aiLimit = getAiSopLimit(planStatus.effectivePlan);
+  if (aiLimit !== null && planStatus.aiSopsUsed >= aiLimit) {
+    return {
+      allowed: false,
+      status: 402,
+      code: "AI_LIMIT_REACHED",
+      upgradeRequired: true,
+      error:
+        planStatus.effectivePlan === "free"
+          ? "Free plan AI SOP limit reached (1/1 used). Upgrade to Pro for 30 AI SOPs/month."
+          : `Pro plan monthly AI SOP limit reached (${aiLimit}/${aiLimit} used). Upgrade to Business for unlimited AI SOPs.`,
+    };
+  }
+
+  const qrLimit = getQrLimit(planStatus.effectivePlan);
+  if (qrLimit !== null) {
+    const { count, error: countError } = await supabase
+      .from("qr_codes")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", userId);
+
+    if (!countError && (count ?? 0) >= qrLimit) {
+      return {
+        allowed: false,
+        status: 402,
+        code: "QR_LIMIT_REACHED",
+        upgradeRequired: true,
+        error: `Free plan limit reached (${qrLimit}/${qrLimit} QR codes). Upgrade to Pro for unlimited QR codes.`,
+      };
+    }
+  }
+
+  return {
+    allowed: true,
+    supabase,
+    planStatus,
+  };
+}
+
 export interface PersistAiQrInput {
   type: "video_sop" | "paper_form";
   category: string;
@@ -115,11 +193,13 @@ export interface PersistAiQrInput {
   description: string | null;
   configJson: Json;
   steps?: VideoSopStep[];
+  showWatermark?: boolean;
 }
 
 export interface PersistAiQrResult {
   id: string;
   short_code: string;
+  show_watermark: boolean;
   isLocalFallback: boolean;
   notice?: string;
 }
@@ -135,11 +215,13 @@ export async function persistAiQrRecord(
 ): Promise<PersistAiQrResult> {
   const shortCode = generateShortCode(8);
   const fallbackId = crypto.randomUUID();
+  const resolvedWatermark = input.showWatermark ?? true;
 
   if (!hasSupabaseEnv()) {
     return {
       id: fallbackId,
       short_code: shortCode,
+      show_watermark: resolvedWatermark,
       isLocalFallback: true,
       notice:
         "Supabase env vars not configured locally — generated AI output in local preview mode.",
@@ -152,6 +234,7 @@ export async function persistAiQrRecord(
       data: { user },
     } = await supabase.auth.getUser();
     const userId = user?.id ?? null;
+    const showWatermark = userId ? resolvedWatermark : true;
 
     const { data: qrRow, error: qrError } = await supabase
       .from("qr_codes")
@@ -163,15 +246,16 @@ export async function persistAiQrRecord(
         category: input.category,
         type: input.type,
         config_json: input.configJson,
-        show_watermark: !userId,
+        show_watermark: showWatermark,
       })
-      .select("id, short_code")
+      .select("id, short_code, show_watermark")
       .single();
 
     if (qrError || !qrRow) {
       return {
         id: fallbackId,
         short_code: shortCode,
+        show_watermark: showWatermark,
         isLocalFallback: true,
         notice:
           qrError?.message ||
@@ -198,6 +282,7 @@ export async function persistAiQrRecord(
         return {
           id: qrRow.id,
           short_code: qrRow.short_code,
+          show_watermark: qrRow.show_watermark,
           isLocalFallback: true,
           notice: `QR saved, but SOP steps insert failed: ${stepsError.message}`,
         };
@@ -207,6 +292,7 @@ export async function persistAiQrRecord(
     return {
       id: qrRow.id,
       short_code: qrRow.short_code,
+      show_watermark: qrRow.show_watermark,
       isLocalFallback: false,
     };
   } catch (err) {
@@ -215,6 +301,7 @@ export async function persistAiQrRecord(
     return {
       id: fallbackId,
       short_code: shortCode,
+      show_watermark: resolvedWatermark,
       isLocalFallback: true,
       notice: `${message} — returned AI output in local preview mode.`,
     };

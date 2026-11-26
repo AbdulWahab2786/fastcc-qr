@@ -9,7 +9,11 @@ import { hasSupabaseEnv } from "@/lib/supabase/env";
 
 type AuthMode = "signin" | "signup";
 
-export function LoginForm() {
+interface LoginFormProps {
+  nextPath?: string;
+}
+
+export function LoginForm({ nextPath = "/dashboard" }: LoginFormProps) {
   const router = useRouter();
   const [mode, setMode] = useState<AuthMode>("signin");
   const [email, setEmail] = useState("");
@@ -52,7 +56,7 @@ export function LoginForm() {
           return;
         }
 
-        router.push("/dashboard");
+        router.push(nextPath);
         router.refresh();
         return;
       }
@@ -68,7 +72,7 @@ export function LoginForm() {
       }
 
       if (data.session) {
-        router.push("/dashboard");
+        router.push(nextPath);
         router.refresh();
         return;
       }

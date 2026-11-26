@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { Type, type Schema } from "@google/genai";
 import {
+  enforceAiRequestGuard,
   GEMINI_MODEL,
   getGeminiClient,
   parseGeminiJson,
@@ -8,6 +9,8 @@ import {
   persistAiQrRecord,
   requireAuthenticatedUser,
 } from "@/lib/ai/gemini";
+import { isPaidPlan } from "@/lib/billing/constants";
+import { incrementUserAiSopsUsed } from "@/lib/billing/plans";
 import type { Json } from "@/types/database";
 import type {
   PaperFormApiResponse,
@@ -133,6 +136,23 @@ export async function POST(request: Request) {
     );
   }
 
+  const guard = await enforceAiRequestGuard(user.id);
+  if (!guard.allowed) {
+    return NextResponse.json(
+      {
+        error: guard.error,
+        code: guard.code,
+        upgradeRequired: Boolean(guard.upgradeRequired),
+      },
+      {
+        status: guard.status,
+        headers: guard.retryAfterSec
+          ? { "Retry-After": String(guard.retryAfterSec) }
+          : undefined,
+      },
+    );
+  }
+
   let formData: FormData;
   try {
     formData = await request.formData();
@@ -231,13 +251,17 @@ export async function POST(request: Request) {
       title: normalized.title,
       description: `Digitized mobile inspection form (${normalized.fields.length} fields).`,
       configJson,
+      showWatermark: !isPaidPlan(guard.planStatus.effectivePlan),
     });
+
+    await incrementUserAiSopsUsed(guard.supabase, user.id);
 
     const payload: PaperFormApiResponse = {
       short_code: persisted.short_code,
       id: persisted.id,
       title: normalized.title,
       fields: normalized.fields,
+      show_watermark: persisted.show_watermark,
       isLocalFallback: persisted.isLocalFallback,
       notice: persisted.notice,
     };

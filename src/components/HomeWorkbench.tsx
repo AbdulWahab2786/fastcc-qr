@@ -79,6 +79,8 @@ export function HomeWorkbench() {
   const [aiErrorMessage, setAiErrorMessage] = useState<string | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [aiAuthRequired, setAiAuthRequired] = useState(false);
+  const [aiUpgradeMessage, setAiUpgradeMessage] = useState<string | null>(null);
+  const [qrUpgradeMessage, setQrUpgradeMessage] = useState<string | null>(null);
 
   useEffect(() => {
     if (!hasSupabaseEnv()) return;
@@ -116,6 +118,7 @@ export function HomeWorkbench() {
   async function handleGeneratePermanentQr() {
     setIsSubmitting(true);
     setBannerNotice(null);
+    setQrUpgradeMessage(null);
 
     const isUrlTab = activeTab === "url";
     const title = isUrlTab ? urlTitle : textTitle;
@@ -128,6 +131,15 @@ export function HomeWorkbench() {
       category,
       type: isUrlTab ? "url" : "standard",
     });
+
+    if (result.blockedByPlanLimit || !result.record) {
+      setQrUpgradeMessage(
+        result.notice ||
+          "Free plan limit reached (10/10 QR codes). Upgrade to Pro for unlimited QR codes.",
+      );
+      setIsSubmitting(false);
+      return;
+    }
 
     setPreview({
       shortCode: result.record.short_code,
@@ -149,6 +161,7 @@ export function HomeWorkbench() {
     const selectedFile = mode === "video" ? videoFile : paperFile;
     setAiStatusMessage(null);
     setAiErrorMessage(null);
+    setAiUpgradeMessage(null);
     setAiAuthRequired(false);
     setBannerNotice(null);
 
@@ -217,6 +230,16 @@ export function HomeWorkbench() {
         return;
       }
 
+      if (response.status === 402) {
+        const message =
+          "error" in body && body.error
+            ? body.error
+            : "Plan limit reached. Upgrade to Pro to continue generating AI SOPs.";
+        setAiStatusMessage(null);
+        setAiUpgradeMessage(message);
+        return;
+      }
+
       if (!response.ok || "error" in body) {
         const message =
           "error" in body && body.error
@@ -243,7 +266,7 @@ export function HomeWorkbench() {
             checklist: videoResult.checklist,
             languages: [aiLanguage],
           } as unknown as Json,
-          show_watermark: true,
+          show_watermark: Boolean(videoResult.show_watermark ?? true),
           scan_count: 0,
           last_scanned_at: null,
           created_at: now,
@@ -292,7 +315,7 @@ export function HomeWorkbench() {
             fields: paperResult.fields,
             languages: [aiLanguage],
           } as unknown as Json,
-          show_watermark: true,
+          show_watermark: Boolean(paperResult.show_watermark ?? true),
           scan_count: 0,
           last_scanned_at: null,
           created_at: now,
@@ -353,6 +376,7 @@ export function HomeWorkbench() {
   }
 
   async function handleLaunchTemplate(preset: TemplatePreset) {
+    setQrUpgradeMessage(null);
     setLaunchingTemplateId(preset.id);
     const result = await createGuestQrCode({
       title: preset.title,
@@ -360,6 +384,13 @@ export function HomeWorkbench() {
       category: preset.category,
     });
     setLaunchingTemplateId(null);
+    if (result.blockedByPlanLimit || !result.record) {
+      setQrUpgradeMessage(
+        result.notice ||
+          "Free plan limit reached (10/10 QR codes). Upgrade to Pro for unlimited QR codes.",
+      );
+      return;
+    }
     router.push(`/studio/${result.record.short_code}`);
   }
 
@@ -377,6 +408,26 @@ export function HomeWorkbench() {
         <div className="mb-5 flex items-center gap-2.5 rounded-lg border border-border bg-surface px-4 py-2.5 text-xs text-ink-muted">
           <AlertCircle className="h-4 w-4 shrink-0 text-utility-blue" />
           <span>{bannerNotice}</span>
+        </div>
+      ) : null}
+
+      {/* Free Plan QR Limit Inline Upgrade Banner */}
+      {qrUpgradeMessage ? (
+        <div
+          role="alert"
+          className="mb-5 flex flex-col gap-3 rounded-lg border border-alert-red/30 bg-alert-red/5 px-4 py-3 text-xs text-ink sm:flex-row sm:items-center sm:justify-between"
+        >
+          <div className="flex items-start gap-2.5">
+            <Lock className="mt-0.5 h-4 w-4 shrink-0 text-alert-red" />
+            <span>{qrUpgradeMessage}</span>
+          </div>
+          <Link
+            href="/pricing"
+            className="inline-flex min-h-9 w-fit shrink-0 items-center justify-center gap-1.5 rounded-lg bg-action-green px-3.5 text-xs font-semibold text-white transition-opacity hover:opacity-95"
+          >
+            Upgrade to Pro
+            <ArrowRight className="h-3.5 w-3.5" />
+          </Link>
         </div>
       ) : null}
 
@@ -419,6 +470,7 @@ export function HomeWorkbench() {
                       setActiveTab(tab.id);
                       setAiStatusMessage(null);
                       setAiErrorMessage(null);
+                      setAiUpgradeMessage(null);
                       setAiAuthRequired(false);
                     }}
                     className={`flex items-center justify-center gap-1.5 border-b-2 px-3 py-3 text-xs font-medium transition-colors sm:text-sm ${
@@ -636,6 +688,25 @@ export function HomeWorkbench() {
                         className="inline-flex min-h-10 shrink-0 items-center justify-center gap-1.5 rounded-lg bg-ink px-4 text-xs font-semibold text-white transition-opacity hover:opacity-90"
                       >
                         Sign In for Free
+                        <ArrowRight className="h-3.5 w-3.5" />
+                      </Link>
+                    </div>
+                  ) : null}
+
+                  {aiUpgradeMessage ? (
+                    <div
+                      role="alert"
+                      className="flex flex-col gap-3 rounded-lg border border-alert-red/30 bg-alert-red/5 p-4 sm:flex-row sm:items-center sm:justify-between"
+                    >
+                      <div className="flex items-start gap-2.5 text-xs text-ink">
+                        <Lock className="mt-0.5 h-4 w-4 shrink-0 text-alert-red" />
+                        <span>{aiUpgradeMessage}</span>
+                      </div>
+                      <Link
+                        href="/pricing"
+                        className="inline-flex min-h-10 shrink-0 items-center justify-center gap-1.5 rounded-lg bg-action-green px-4 text-xs font-semibold text-white transition-opacity hover:opacity-95"
+                      >
+                        Upgrade to Pro
                         <ArrowRight className="h-3.5 w-3.5" />
                       </Link>
                     </div>

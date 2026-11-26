@@ -23,6 +23,7 @@ export interface VideoSopApiResponse {
   summary: string;
   steps: VideoSopStep[];
   checklist: VideoSopChecklistItem[];
+  show_watermark?: boolean;
   isLocalFallback?: boolean;
   notice?: string;
 }
@@ -42,6 +43,7 @@ export interface PaperFormApiResponse {
   id: string;
   title: string;
   fields: PaperFormField[];
+  show_watermark?: boolean;
   isLocalFallback?: boolean;
   notice?: string;
 }

@@ -1,4 +1,4 @@
-import type { Database, InspectionStatus } from "./database";
+import type { Database, InspectionStatus, PlanTier } from "./database";
 
 export type QrCodeRow = Database["public"]["Tables"]["qr_codes"]["Row"];
 export type QrCodeInsert = Database["public"]["Tables"]["qr_codes"]["Insert"];
@@ -12,6 +12,14 @@ export type InspectionLogRow =
   Database["public"]["Tables"]["inspection_logs"]["Row"];
 export type InspectionLogInsert =
   Database["public"]["Tables"]["inspection_logs"]["Insert"];
+
+export type UserPlanRow = Database["public"]["Tables"]["user_plans"]["Row"];
+export type UserPlanInsert =
+  Database["public"]["Tables"]["user_plans"]["Insert"];
+export type UserPlanUpdate =
+  Database["public"]["Tables"]["user_plans"]["Update"];
+
+export type { PlanTier };
 
 export interface StepResult {
   step_id: string;
