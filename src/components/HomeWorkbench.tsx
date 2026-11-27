@@ -38,6 +38,7 @@ import {
   LayoutGrid,
 } from "lucide-react";
 import { QrCodePreview } from "@/components/QrCodePreview";
+import { LandingHero } from "@/components/LandingHero";
 import {
   QrBeautifyControls,
   QrLabelThemeGrid,
@@ -985,47 +986,47 @@ export function HomeWorkbench({ initialTemplateId }: HomeWorkbenchProps) {
   ];
 
   return (
-    <div className="mx-auto max-w-6xl px-4 py-10 sm:px-6 sm:py-14">
-      {/* Subtle Local Fallback Banner */}
-      {bannerNotice ? (
-        <div className="mb-5 flex items-center gap-2.5 rounded-lg border border-border bg-surface px-4 py-2.5 text-xs text-ink-muted">
-          <AlertCircle className="h-4 w-4 shrink-0 text-utility-blue" />
-          <span>{bannerNotice}</span>
-        </div>
-      ) : null}
+    <div>
+      {/* Hero Section with Pure-White Dot-Grid Background */}
+      <div
+        className="border-b border-neutral-200/70 bg-white"
+        style={{
+          backgroundImage: "radial-gradient(#e5e7eb 1px, transparent 1px)",
+          backgroundSize: "24px 24px",
+        }}
+      >
+        <div className="mx-auto max-w-6xl px-4 py-10 sm:px-6 sm:py-14">
+          {/* Subtle Local Fallback Banner */}
+          {bannerNotice ? (
+            <div className="mb-5 flex items-center gap-2.5 rounded-lg border border-border bg-surface px-4 py-2.5 text-xs text-ink-muted">
+              <AlertCircle className="h-4 w-4 shrink-0 text-utility-blue" />
+              <span>{bannerNotice}</span>
+            </div>
+          ) : null}
 
-      {/* Free Plan QR Limit Inline Upgrade Banner */}
-      {qrUpgradeMessage ? (
-        <div
-          role="alert"
-          className="mb-5 flex flex-col gap-3 rounded-lg border border-alert-red/30 bg-alert-red/5 px-4 py-3 text-xs text-ink sm:flex-row sm:items-center sm:justify-between"
-        >
-          <div className="flex items-start gap-2.5">
-            <Lock className="mt-0.5 h-4 w-4 shrink-0 text-alert-red" />
-            <span>{qrUpgradeMessage}</span>
-          </div>
-          <Link
-            href="/pricing"
-            className="inline-flex min-h-9 w-fit shrink-0 items-center justify-center gap-1.5 rounded-lg bg-action-green px-3.5 text-xs font-semibold text-white transition-opacity hover:opacity-95"
-          >
-            Upgrade to Pro
-            <ArrowRight className="h-3.5 w-3.5" />
-          </Link>
-        </div>
-      ) : null}
+          {/* Free Plan QR Limit Inline Upgrade Banner */}
+          {qrUpgradeMessage ? (
+            <div
+              role="alert"
+              className="mb-5 flex flex-col gap-3 rounded-lg border border-alert-red/30 bg-alert-red/5 px-4 py-3 text-xs text-ink sm:flex-row sm:items-center sm:justify-between"
+            >
+              <div className="flex items-start gap-2.5">
+                <Lock className="mt-0.5 h-4 w-4 shrink-0 text-alert-red" />
+                <span>{qrUpgradeMessage}</span>
+              </div>
+              <Link
+                href="/pricing"
+                className="inline-flex min-h-9 w-fit shrink-0 items-center justify-center gap-1.5 rounded-lg bg-action-green px-3.5 text-xs font-semibold text-white transition-opacity hover:opacity-95"
+              >
+                Upgrade to Pro
+                <ArrowRight className="h-3.5 w-3.5" />
+              </Link>
+            </div>
+          ) : null}
 
-      {/* Hero 2-Column CaoLiao-Style Workbench */}
-      <section id="workbench-top" aria-label="Instant QR Workbench">
-        <div className="mx-auto mb-8 max-w-3xl text-center sm:mb-10">
-          <h1 className="text-3xl font-semibold tracking-tight text-ink sm:text-4xl">
-            QR SOPs &amp; Live-Photo Audits for Indian Shop Floors
-          </h1>
-          <p className="mt-3 text-base text-ink-muted sm:text-lg">
-            Create permanent machine QR codes in seconds. Workers scan with zero
-            app or login, capture GPS-stamped photos, and you export 1-click
-            audit PDFs.
-          </p>
-        </div>
+          {/* Hero 2-Column CaoLiao-Style Workbench */}
+          <section id="workbench-top" aria-label="Instant QR Workbench">
+            <LandingHero />
 
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-12 lg:items-start">
           {/* Left Column: Industry Template Picker + Tabbed Input */}
@@ -1960,9 +1961,11 @@ export function HomeWorkbench({ initialTemplateId }: HomeWorkbenchProps) {
           </div>
         </div>
       </section>
+        </div>
+      </div>
 
       {/* 1-Click Industry Template Gallery (Below the Fold) */}
-      <section id="templates" className="mt-16 border-t border-border pt-14 sm:mt-20 sm:pt-16">
+      <section id="templates" className="mx-auto max-w-6xl px-4 pb-10 pt-14 sm:px-6 sm:pb-14 sm:pt-16">
         <div className="mb-8 flex flex-col justify-between gap-2 sm:flex-row sm:items-end">
           <div>
             <h2 className="text-xl font-semibold tracking-tight text-ink sm:text-2xl">
