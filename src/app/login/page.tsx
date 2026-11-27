@@ -1,23 +1,16 @@
 import { Suspense } from "react";
 import { redirect } from "next/navigation";
 import { LoginForm } from "@/components/LoginForm";
+import { getSafeNextPath } from "@/lib/auth/redirect";
 import { hasSupabaseEnv } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
 
 interface LoginPageProps {
-  searchParams: Promise<{ next?: string }>;
-}
-
-function getSafeNextPath(rawNext: string | undefined): string {
-  if (!rawNext) return "/dashboard";
-  if (rawNext.startsWith("/") && !rawNext.startsWith("//")) {
-    return rawNext;
-  }
-  return "/dashboard";
+  searchParams: Promise<{ next?: string; error?: string }>;
 }
 
 async function LoginGate({ searchParams }: LoginPageProps) {
-  const { next } = await searchParams;
+  const { next, error } = await searchParams;
   const nextPath = getSafeNextPath(next);
 
   if (hasSupabaseEnv()) {
@@ -37,7 +30,7 @@ async function LoginGate({ searchParams }: LoginPageProps) {
     }
   }
 
-  return <LoginForm nextPath={nextPath} />;
+  return <LoginForm nextPath={nextPath} initialError={error} />;
 }
 
 export default function LoginPage({ searchParams }: LoginPageProps) {
