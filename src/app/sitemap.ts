@@ -1,10 +1,9 @@
 import type { MetadataRoute } from "next";
 import { getAllSeoTemplates } from "@/data/seo-templates";
+import { getSiteBaseUrl } from "@/lib/site-url";
 
 export default function sitemap(): MetadataRoute.Sitemap {
-  const baseUrl = (
-    process.env.NEXT_PUBLIC_APP_URL || "https://fastcc.in"
-  ).replace(/\/$/, "");
+  const baseUrl = getSiteBaseUrl();
 
   const staticRoutes: MetadataRoute.Sitemap = [
     {

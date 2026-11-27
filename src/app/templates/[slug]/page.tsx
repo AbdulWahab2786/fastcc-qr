@@ -18,10 +18,9 @@ import {
   getTemplatesByIndustry,
 } from "@/data/seo-templates";
 import type { SeoTemplateFrequency } from "@/data/seo-templates/types";
+import { getSiteBaseUrl } from "@/lib/site-url";
 
-const baseUrl = (
-  process.env.NEXT_PUBLIC_APP_URL || "https://fastcc.in"
-).replace(/\/$/, "");
+const baseUrl = getSiteBaseUrl();
 
 const FREQUENCY_LABELS: Record<SeoTemplateFrequency, string> = {
   daily: "Daily Inspection",

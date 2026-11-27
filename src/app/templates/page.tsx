@@ -4,10 +4,9 @@ import Link from "next/link";
 import { ArrowRight, QrCode } from "lucide-react";
 import { TemplatesDirectoryClient } from "@/components/TemplatesDirectoryClient";
 import { getAllSeoTemplates, SEO_INDUSTRIES } from "@/data/seo-templates";
+import { getSiteBaseUrl } from "@/lib/site-url";
 
-const baseUrl = (
-  process.env.NEXT_PUBLIC_APP_URL || "https://fastcc.in"
-).replace(/\/$/, "");
+const baseUrl = getSiteBaseUrl();
 
 export const metadata: Metadata = {
   title: "Industrial SOP & Inspection QR Templates | FastCC QR",
