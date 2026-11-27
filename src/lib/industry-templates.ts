@@ -1,4 +1,9 @@
 import type { InspectionSchedule } from "@/lib/inspection-schedule";
+import type {
+  QrDotStyle,
+  QrLabelThemeId,
+  QrThemeColorId,
+} from "@/lib/qr-label-themes";
 import type { VideoSopChecklistItem } from "@/types/ai";
 import type { Json } from "@/types/database";
 
@@ -259,6 +264,9 @@ export function buildSopConfigJson(params: {
   managerWhatsapp?: string;
   folder?: string;
   inspectionSchedule?: InspectionSchedule;
+  labelTheme?: QrLabelThemeId;
+  themeColor?: QrThemeColorId;
+  dotStyle?: QrDotStyle;
 }): Json {
   const payload: Record<string, Json> = {
     checklist: params.checklist.map((item) => ({
@@ -284,6 +292,18 @@ export function buildSopConfigJson(params: {
 
   if (params.inspectionSchedule && params.inspectionSchedule !== "none") {
     payload.inspection_schedule = params.inspectionSchedule;
+  }
+
+  if (params.labelTheme) {
+    payload.label_theme = params.labelTheme;
+  }
+
+  if (params.themeColor) {
+    payload.theme_color = params.themeColor;
+  }
+
+  if (params.dotStyle && params.dotStyle !== "square") {
+    payload.dot_style = params.dotStyle;
   }
 
   return payload;

@@ -33,8 +33,14 @@ import {
   ClipboardList,
   Folder,
   Clock,
+  Palette,
+  LayoutGrid,
 } from "lucide-react";
 import { QrCodePreview } from "@/components/QrCodePreview";
+import {
+  QrBeautifyControls,
+  QrLabelThemeGrid,
+} from "@/components/QrLabelThemePicker";
 import {
   buildSopConfigJson,
   formatTemplateStepsText,
@@ -59,7 +65,18 @@ import {
   saveLocalQrRecord,
   saveLocalSopSteps,
 } from "@/lib/qr-utils";
-import { downloadQrPng, downloadQrSvg } from "@/lib/qr-export";
+import {
+  downloadQrSvg,
+  downloadThemedLabelPng,
+} from "@/lib/qr-export";
+import {
+  DEFAULT_QR_DOT_STYLE,
+  DEFAULT_QR_LABEL_THEME,
+  DEFAULT_QR_THEME_COLOR,
+  type QrDotStyle,
+  type QrLabelThemeId,
+  type QrThemeColorId,
+} from "@/lib/qr-label-themes";
 import type {
   PaperFormApiResponse,
   VideoSopApiResponse,
@@ -188,6 +205,18 @@ export function HomeWorkbench({ initialTemplateId }: HomeWorkbenchProps) {
   // Generation & Preview state
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [bannerNotice, setBannerNotice] = useState<string | null>(null);
+  const [previewMode, setPreviewMode] = useState<"label" | "qr">("label");
+  const [labelTheme, setLabelTheme] = useState<QrLabelThemeId>(
+    DEFAULT_QR_LABEL_THEME,
+  );
+  const [themeColor, setThemeColor] = useState<QrThemeColorId>(
+    DEFAULT_QR_THEME_COLOR,
+  );
+  const [dotStyle, setDotStyle] = useState<QrDotStyle>(DEFAULT_QR_DOT_STYLE);
+  const [activePreviewPanel, setActivePreviewPanel] = useState<
+    "none" | "beautify" | "theme"
+  >("none");
+  const [isDownloadingPng, setIsDownloadingPng] = useState(false);
   const [preview, setPreview] = useState<ActivePreview>({
     shortCode: "demo",
     title: "D2C Packing Station #04",
@@ -198,6 +227,54 @@ export function HomeWorkbench({ initialTemplateId }: HomeWorkbenchProps) {
 
   const scanUrl = getQrScanUrl(preview.shortCode);
   const selectedTemplate = getIndustryTemplateById(selectedTemplateId);
+
+  const livePreviewTitle = preview.isDemo
+    ? activeTab === "url"
+      ? urlTitle.trim() || preview.title
+      : activeTab === "text"
+        ? textTitle.trim() || preview.title
+        : preview.title
+    : preview.title;
+
+  const livePreviewSubtitle = preview.isDemo
+    ? activeTab === "url"
+      ? "Scan for SOP & Link"
+      : "Scan for SOP & Logs"
+    : preview.subtitle;
+
+  const liveScheduleLabel =
+    inspectionSchedule !== "none"
+      ? (INSPECTION_SCHEDULE_OPTIONS.find(
+          (option) => option.value === inspectionSchedule,
+        )?.label ?? "")
+      : "";
+
+  async function handleDownloadPreviewPng() {
+    setIsDownloadingPng(true);
+    try {
+      const effectiveTheme: QrLabelThemeId =
+        previewMode === "qr" ? "classic" : labelTheme;
+      const suffix =
+        effectiveTheme === "classic" ? "" : `-${effectiveTheme}`;
+      await downloadThemedLabelPng(
+        {
+          qrUrl: scanUrl,
+          shortCode: preview.shortCode,
+          title: livePreviewTitle,
+          subtitle: livePreviewSubtitle,
+          folder: siteFolder.trim(),
+          scheduleLabel: liveScheduleLabel,
+          theme: effectiveTheme,
+          themeColor,
+          dotStyle,
+          showWatermark: false,
+        },
+        `fastcc-${preview.shortCode}${suffix}.png`,
+      );
+    } finally {
+      setIsDownloadingPng(false);
+    }
+  }
 
   function applyIndustryTemplate(
     template: IndustryTemplate,
@@ -265,7 +342,13 @@ export function HomeWorkbench({ initialTemplateId }: HomeWorkbenchProps) {
     const normalizedFolder =
       rawFolder && rawFolder.toLowerCase() !== "unassigned" ? rawFolder : "";
 
-    const urlConfigObj: Record<string, Json> = {};
+    const urlConfigObj: Record<string, Json> = {
+      label_theme: labelTheme,
+      theme_color: themeColor,
+    };
+    if (dotStyle !== "square") {
+      urlConfigObj.dot_style = dotStyle;
+    }
     if (normalizedFolder) {
       urlConfigObj.folder = normalizedFolder;
     }
@@ -274,15 +357,16 @@ export function HomeWorkbench({ initialTemplateId }: HomeWorkbenchProps) {
     }
 
     const configJson: Json | undefined = isUrlTab
-      ? Object.keys(urlConfigObj).length > 0
-        ? (urlConfigObj as Json)
-        : undefined
+      ? (urlConfigObj as Json)
       : buildSopConfigJson({
           summary: selectedTemplate?.description,
           checklist: checklistItems,
           managerWhatsapp: trimmedWhatsapp,
           folder: normalizedFolder,
           inspectionSchedule,
+          labelTheme,
+          themeColor,
+          dotStyle,
         });
 
     const result = await createGuestQrCode({
@@ -458,6 +542,9 @@ export function HomeWorkbench({ initialTemplateId }: HomeWorkbenchProps) {
             summary: videoResult.summary,
             checklist: videoResult.checklist,
             languages: [aiLanguage],
+            label_theme: labelTheme,
+            theme_color: themeColor,
+            ...(dotStyle !== "square" ? { dot_style: dotStyle } : {}),
             ...(trimmedWhatsapp ? { manager_whatsapp: trimmedWhatsapp } : {}),
             ...(normalizedFolder ? { folder: normalizedFolder } : {}),
             ...(inspectionSchedule !== "none"
@@ -514,6 +601,9 @@ export function HomeWorkbench({ initialTemplateId }: HomeWorkbenchProps) {
           config_json: {
             fields: paperResult.fields,
             languages: [aiLanguage],
+            label_theme: labelTheme,
+            theme_color: themeColor,
+            ...(dotStyle !== "square" ? { dot_style: dotStyle } : {}),
             ...(trimmedWhatsapp ? { manager_whatsapp: trimmedWhatsapp } : {}),
             ...(normalizedFolder ? { folder: normalizedFolder } : {}),
             ...(inspectionSchedule !== "none"
@@ -1278,53 +1368,182 @@ export function HomeWorkbench({ initialTemplateId }: HomeWorkbenchProps) {
           {/* Right Column: Live QR Preview */}
           <div className="flex flex-col justify-between rounded-xl border border-border bg-surface p-6 shadow-[0_1px_2px_rgba(15,23,42,0.03)] lg:col-span-5">
             <div>
-              <div className="flex items-center justify-between gap-2">
-                <span className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-ink-muted">
-                  <CheckCircle2 className="h-4 w-4 text-action-green" />
-                  Live QR Preview
-                </span>
-                <span className="rounded border border-border bg-canvas-muted px-2 py-0.5 font-mono text-xs text-ink">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div
+                  role="tablist"
+                  aria-label="QR Preview Mode"
+                  className="inline-flex rounded-lg border border-border bg-canvas-muted p-0.5"
+                >
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={previewMode === "label"}
+                    onClick={() => setPreviewMode("label")}
+                    className={`rounded-md px-2.5 py-1 text-xs font-semibold transition-colors ${
+                      previewMode === "label"
+                        ? "bg-surface text-ink shadow-2xs"
+                        : "text-ink-muted hover:text-ink"
+                    }`}
+                  >
+                    Label Preview
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={previewMode === "qr"}
+                    onClick={() => setPreviewMode("qr")}
+                    className={`rounded-md px-2.5 py-1 text-xs font-semibold transition-colors ${
+                      previewMode === "qr"
+                        ? "bg-surface text-ink shadow-2xs"
+                        : "text-ink-muted hover:text-ink"
+                    }`}
+                  >
+                    QR Code
+                  </button>
+                </div>
+
+                <span className="inline-flex items-center gap-1 rounded border border-border bg-canvas-muted px-2 py-0.5 font-mono text-xs text-ink">
+                  <CheckCircle2 className="h-3.5 w-3.5 text-action-green" />
                   {preview.shortCode}
                 </span>
               </div>
 
-              <div className="mt-4 flex flex-col items-center rounded-xl border border-border bg-canvas p-5 text-center">
-                <QrCodePreview value={scanUrl} size={208} />
-                <p className="mt-3 text-sm font-semibold text-ink">
-                  {preview.title}
-                </p>
-                <p className="mt-0.5 text-xs text-ink-muted">
-                  {preview.subtitle}
-                </p>
-                <p className="mt-1 font-mono text-xs text-ink-muted">
-                  /q/{preview.shortCode}
-                </p>
+              <div className="mt-4 flex flex-col items-center justify-center rounded-xl border border-border bg-canvas p-5 text-center">
+                {previewMode === "qr" ? (
+                  <>
+                    <QrCodePreview
+                      value={scanUrl}
+                      size={208}
+                      theme="classic"
+                      dotStyle={dotStyle}
+                    />
+                    <p className="mt-3 text-sm font-semibold text-ink">
+                      {livePreviewTitle}
+                    </p>
+                    <p className="mt-0.5 text-xs text-ink-muted">
+                      {livePreviewSubtitle}
+                    </p>
+                    <p className="mt-1 font-mono text-xs text-ink-muted">
+                      /q/{preview.shortCode}
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <QrCodePreview
+                      value={scanUrl}
+                      size={184}
+                      theme={labelTheme}
+                      themeColor={themeColor}
+                      dotStyle={dotStyle}
+                      title={livePreviewTitle}
+                      subtitle={livePreviewSubtitle}
+                      folder={siteFolder.trim()}
+                      shortCode={preview.shortCode}
+                      scheduleLabel={liveScheduleLabel}
+                    />
+                    {labelTheme === "classic" ? (
+                      <>
+                        <p className="mt-3 text-sm font-semibold text-ink">
+                          {livePreviewTitle}
+                        </p>
+                        <p className="mt-0.5 text-xs text-ink-muted">
+                          {livePreviewSubtitle}
+                        </p>
+                      </>
+                    ) : null}
+                    <p className="mt-2 font-mono text-[11px] text-ink-muted">
+                      /q/{preview.shortCode}
+                    </p>
+                  </>
+                )}
               </div>
+
+              {/* Minimal 3-Button Bottom Action Bar */}
+              <div className="mt-3 grid grid-cols-3 gap-2">
+                <button
+                  type="button"
+                  aria-expanded={activePreviewPanel === "beautify"}
+                  onClick={() =>
+                    setActivePreviewPanel((prev) =>
+                      prev === "beautify" ? "none" : "beautify",
+                    )
+                  }
+                  className={`inline-flex min-h-10 items-center justify-center gap-1.5 rounded-lg border px-2.5 text-xs font-semibold transition-colors ${
+                    activePreviewPanel === "beautify"
+                      ? "border-ink bg-canvas-muted text-ink"
+                      : "border-border bg-surface text-ink hover:bg-canvas-muted"
+                  }`}
+                >
+                  <Palette className="h-3.5 w-3.5 text-utility-blue" />
+                  Beautify
+                </button>
+                <button
+                  type="button"
+                  aria-expanded={activePreviewPanel === "theme"}
+                  onClick={() =>
+                    setActivePreviewPanel((prev) =>
+                      prev === "theme" ? "none" : "theme",
+                    )
+                  }
+                  className={`inline-flex min-h-10 items-center justify-center gap-1.5 rounded-lg border px-2.5 text-xs font-semibold transition-colors ${
+                    activePreviewPanel === "theme"
+                      ? "border-utility-blue bg-utility-blue/5 text-ink"
+                      : "border-border bg-surface text-ink hover:bg-canvas-muted"
+                  }`}
+                >
+                  <LayoutGrid className="h-3.5 w-3.5 text-utility-blue" />
+                  Label Theme
+                </button>
+                <button
+                  type="button"
+                  disabled={isDownloadingPng}
+                  onClick={handleDownloadPreviewPng}
+                  className="inline-flex min-h-10 items-center justify-center gap-1.5 rounded-lg border border-border bg-surface px-2.5 text-xs font-semibold text-ink transition-colors hover:bg-canvas-muted disabled:opacity-60"
+                >
+                  <Download className="h-3.5 w-3.5 text-action-green" />
+                  {isDownloadingPng ? "Saving..." : "Download"}
+                </button>
+              </div>
+
+              {activePreviewPanel === "beautify" ? (
+                <div className="mt-3 rounded-xl border border-border bg-canvas p-3.5">
+                  <QrBeautifyControls
+                    themeColor={themeColor}
+                    dotStyle={dotStyle}
+                    onSelectColor={(color) => setThemeColor(color)}
+                    onSelectDotStyle={(style) => setDotStyle(style)}
+                  />
+                </div>
+              ) : null}
+
+              {activePreviewPanel === "theme" ? (
+                <div className="mt-3 rounded-xl border border-border bg-canvas p-3.5">
+                  <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-ink-muted">
+                    Choose Print Label Theme (Free for All Users)
+                  </p>
+                  <QrLabelThemeGrid
+                    selectedTheme={labelTheme}
+                    themeColor={themeColor}
+                    onSelectTheme={(theme) => {
+                      setLabelTheme(theme);
+                      setPreviewMode("label");
+                    }}
+                  />
+                </div>
+              ) : null}
             </div>
 
-            <div className="mt-5 space-y-2.5">
-              <div className="grid grid-cols-2 gap-2.5">
-                <button
-                  type="button"
-                  onClick={() =>
-                    downloadQrPng(scanUrl, `fastcc-${preview.shortCode}.png`)
-                  }
-                  className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-lg border border-border bg-surface px-3 text-xs font-semibold text-ink transition-colors hover:bg-canvas-muted"
-                >
-                  <Download className="h-4 w-4 text-utility-blue" />
-                  Download PNG
-                </button>
-                <button
-                  type="button"
-                  onClick={() =>
-                    downloadQrSvg(scanUrl, `fastcc-${preview.shortCode}.svg`)
-                  }
-                  className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-lg border border-border bg-surface px-3 text-xs font-semibold text-ink transition-colors hover:bg-canvas-muted"
-                >
-                  <Download className="h-4 w-4 text-utility-blue" />
-                  Download SVG
-                </button>
-              </div>
+            <div className="mt-4 space-y-2.5">
+              <button
+                type="button"
+                onClick={() =>
+                  downloadQrSvg(scanUrl, `fastcc-${preview.shortCode}.svg`)
+                }
+                className="inline-flex min-h-10 w-full items-center justify-center gap-1.5 rounded-lg border border-border bg-surface px-3 text-xs font-semibold text-ink transition-colors hover:bg-canvas-muted"
+              >
+                <Download className="h-3.5 w-3.5 text-utility-blue" />
+                Download Vector SVG
+              </button>
 
               <Link
                 href={`/studio/${preview.shortCode}`}

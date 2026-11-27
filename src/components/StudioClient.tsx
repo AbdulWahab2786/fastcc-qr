@@ -21,8 +21,13 @@ import {
   MessageCircle,
   Folder,
   Clock,
+  LayoutGrid,
 } from "lucide-react";
 import { QrCodePreview } from "@/components/QrCodePreview";
+import {
+  QrBeautifyControls,
+  QrLabelThemeGrid,
+} from "@/components/QrLabelThemePicker";
 import {
   AUDIT_DATE_RANGE_OPTIONS,
   exportAuditReportCsv,
@@ -43,8 +48,15 @@ import {
 import {
   downloadStickerPng,
   downloadStickerSvg,
+  downloadThemedLabelPng,
   type StudioLayoutPreset,
 } from "@/lib/qr-export";
+import {
+  extractLabelThemeFromConfig,
+  type QrDotStyle,
+  type QrLabelThemeId,
+  type QrThemeColorId,
+} from "@/lib/qr-label-themes";
 import {
   EMPTY_FOLDER_SUGGESTIONS,
   getDemoQrRecord,
@@ -159,6 +171,17 @@ export function StudioClient({
   const [scheduleOverride, setScheduleOverride] =
     useState<InspectionSchedule | null>(null);
   const inspectionSchedule = scheduleOverride ?? initialSchedule;
+  const initialThemeConfig = extractLabelThemeFromConfig(record.config_json);
+  const [labelThemeOverride, setLabelThemeOverride] =
+    useState<QrLabelThemeId | null>(null);
+  const [themeColorOverride, setThemeColorOverride] =
+    useState<QrThemeColorId | null>(null);
+  const [dotStyleOverride, setDotStyleOverride] = useState<QrDotStyle | null>(
+    null,
+  );
+  const labelTheme = labelThemeOverride ?? initialThemeConfig.labelTheme;
+  const themeColor = themeColorOverride ?? initialThemeConfig.themeColor;
+  const dotStyle = dotStyleOverride ?? initialThemeConfig.dotStyle;
   const activeFolderLabel =
     folderValue.trim() && folderValue.trim().toLowerCase() !== "unassigned"
       ? folderValue.trim()
@@ -342,6 +365,14 @@ export function StudioClient({
       delete baseConfig.inspection_schedule;
     }
 
+    baseConfig.label_theme = labelTheme;
+    baseConfig.theme_color = themeColor;
+    if (dotStyle !== "square") {
+      baseConfig.dot_style = dotStyle;
+    } else {
+      delete baseConfig.dot_style;
+    }
+
     const nextConfigJson = baseConfig as Json;
     const nextTitle = headerTitle.trim() || record.title;
 
@@ -445,18 +476,43 @@ export function StudioClient({
   async function handleDownloadPng() {
     setExporting("png");
     try {
-      await downloadStickerPng(
-        {
-          qrUrl: scanUrl,
-          shortCode: record.short_code,
-          title: headerTitle,
-          subtitle,
-          preset,
-          logoSrc: activeLogoSrc,
-          showWatermark: effectiveWatermark,
-        },
-        `fastcc-label-${record.short_code}-${preset}.png`,
-      );
+      if (labelTheme !== "classic") {
+        const scheduleLabel =
+          inspectionSchedule !== "none"
+            ? (INSPECTION_SCHEDULE_OPTIONS.find(
+                (o) => o.value === inspectionSchedule,
+              )?.label ?? "")
+            : "";
+        await downloadThemedLabelPng(
+          {
+            qrUrl: scanUrl,
+            shortCode: record.short_code,
+            title: headerTitle,
+            subtitle,
+            folder: activeFolderLabel,
+            scheduleLabel,
+            theme: labelTheme,
+            themeColor,
+            dotStyle,
+            logoSrc: activeLogoSrc,
+            showWatermark: effectiveWatermark,
+          },
+          `fastcc-label-${record.short_code}-${labelTheme}.png`,
+        );
+      } else {
+        await downloadStickerPng(
+          {
+            qrUrl: scanUrl,
+            shortCode: record.short_code,
+            title: headerTitle,
+            subtitle,
+            preset,
+            logoSrc: activeLogoSrc,
+            showWatermark: effectiveWatermark,
+          },
+          `fastcc-label-${record.short_code}-${preset}.png`,
+        );
+      }
     } finally {
       setExporting(null);
     }
@@ -656,6 +712,43 @@ export function StudioClient({
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
         {/* Left Controls Panel (hidden on print) */}
         <aside className="no-print space-y-5 lg:col-span-5 print:hidden">
+          {/* Label Theme & Color (Free for All Users) */}
+          <section className="rounded-xl border border-border bg-surface p-5 space-y-4">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <LayoutGrid className="h-4 w-4 text-utility-blue" />
+                <h2 className="text-sm font-semibold text-ink">
+                  Label Theme &amp; Color
+                </h2>
+              </div>
+              <span className="rounded border border-action-green/30 bg-action-green/10 px-2 py-0.5 font-mono text-[10px] font-semibold uppercase text-action-green">
+                All Plans
+              </span>
+            </div>
+
+            <QrLabelThemeGrid
+              selectedTheme={labelTheme}
+              themeColor={themeColor}
+              onSelectTheme={(theme) => {
+                setLabelThemeOverride(theme);
+                setLabelSavedNotice(false);
+              }}
+            />
+
+            <QrBeautifyControls
+              themeColor={themeColor}
+              dotStyle={dotStyle}
+              onSelectColor={(color) => {
+                setThemeColorOverride(color);
+                setLabelSavedNotice(false);
+              }}
+              onSelectDotStyle={(style) => {
+                setDotStyleOverride(style);
+                setLabelSavedNotice(false);
+              }}
+            />
+          </section>
+
           {/* Layout Presets */}
           <section className="rounded-xl border border-border bg-surface p-5">
             <div className="flex items-center gap-2">
@@ -1231,62 +1324,91 @@ export function StudioClient({
           aria-label="Printable Sticker Preview"
           className="flex items-start justify-center rounded-xl border border-border bg-canvas-muted/60 p-4 sm:p-8 lg:col-span-7 print:col-span-12 print:border-0 print:bg-white print:p-0"
         >
-          <div
-            id="printable-sticker"
-            data-preset={preset}
-            className={`relative flex flex-col items-center rounded-xl border bg-white text-center ${presetContainerClasses[preset]}`}
-          >
-            {/* Equipment Plate / Poster Top Bar */}
-            {preset !== "thermal-sticker" ? (
-              <div className="w-full border-b border-border pb-3">
-                <div className="mx-auto mb-2 h-1.5 w-16 rounded-full bg-ink" />
-                <h2
-                  className={`font-bold tracking-tight text-ink ${
-                    preset === "a4-poster" ? "text-2xl" : "text-xl"
-                  }`}
-                >
-                  {headerTitle || "Operations SOP"}
-                </h2>
-                <p
-                  className={`mt-1 font-medium text-ink-muted ${
-                    preset === "a4-poster" ? "text-sm" : "text-xs"
-                  }`}
-                >
-                  {subtitle || "Scan for step-by-step instructions"}
-                </p>
-              </div>
-            ) : (
-              <div className="w-full pb-2">
-                <h2 className="text-base font-bold leading-tight text-ink">
-                  {headerTitle || "Operations SOP"}
-                </h2>
-                <p className="mt-0.5 text-[11px] font-medium text-ink-muted">
-                  {subtitle || "Scan for instructions"}
-                </p>
-              </div>
-            )}
-
-            {/* High-ECC QR Code with Optional Center Logo & Tight Anti-Crop Watermark */}
-            <div className="my-2 flex flex-col items-center">
+          {labelTheme !== "classic" ? (
+            <div
+              id="printable-sticker"
+              className="flex w-full items-center justify-center py-4"
+            >
               <QrCodePreview
                 value={scanUrl}
-                size={qrSizeByPreset[preset]}
+                size={210}
                 logoSrc={activeLogoSrc}
                 showWatermark={effectiveWatermark}
+                theme={labelTheme}
+                themeColor={themeColor}
+                dotStyle={dotStyle}
+                title={headerTitle || "Operations SOP"}
+                subtitle={subtitle || "Scan for step-by-step instructions"}
+                folder={activeFolderLabel}
+                shortCode={record.short_code}
+                scheduleLabel={
+                  inspectionSchedule !== "none"
+                    ? (INSPECTION_SCHEDULE_OPTIONS.find(
+                        (o) => o.value === inspectionSchedule,
+                      )?.label ?? "")
+                    : ""
+                }
               />
-              <div className="mt-3 inline-flex items-center gap-1.5 rounded border border-border bg-canvas-muted px-2.5 py-1 font-mono text-xs font-semibold text-ink">
-                ID: {record.short_code}
+            </div>
+          ) : (
+            <div
+              id="printable-sticker"
+              data-preset={preset}
+              className={`relative flex flex-col items-center rounded-xl border bg-white text-center ${presetContainerClasses[preset]}`}
+            >
+              {/* Equipment Plate / Poster Top Bar */}
+              {preset !== "thermal-sticker" ? (
+                <div className="w-full border-b border-border pb-3">
+                  <div className="mx-auto mb-2 h-1.5 w-16 rounded-full bg-ink" />
+                  <h2
+                    className={`font-bold tracking-tight text-ink ${
+                      preset === "a4-poster" ? "text-2xl" : "text-xl"
+                    }`}
+                  >
+                    {headerTitle || "Operations SOP"}
+                  </h2>
+                  <p
+                    className={`mt-1 font-medium text-ink-muted ${
+                      preset === "a4-poster" ? "text-sm" : "text-xs"
+                    }`}
+                  >
+                    {subtitle || "Scan for step-by-step instructions"}
+                  </p>
+                </div>
+              ) : (
+                <div className="w-full pb-2">
+                  <h2 className="text-base font-bold leading-tight text-ink">
+                    {headerTitle || "Operations SOP"}
+                  </h2>
+                  <p className="mt-0.5 text-[11px] font-medium text-ink-muted">
+                    {subtitle || "Scan for instructions"}
+                  </p>
+                </div>
+              )}
+
+              {/* High-ECC QR Code with Optional Center Logo & Tight Anti-Crop Watermark */}
+              <div className="my-2 flex flex-col items-center">
+                <QrCodePreview
+                  value={scanUrl}
+                  size={qrSizeByPreset[preset]}
+                  logoSrc={activeLogoSrc}
+                  showWatermark={effectiveWatermark}
+                  dotStyle={dotStyle}
+                />
+                <div className="mt-3 inline-flex items-center gap-1.5 rounded border border-border bg-canvas-muted px-2.5 py-1 font-mono text-xs font-semibold text-ink">
+                  ID: {record.short_code}
+                </div>
+              </div>
+
+              <div className="w-full pt-1">
+                <span className="sr-only">
+                  {effectiveWatermark
+                    ? "Powered by FastCC QR"
+                    : "Watermark disabled"}
+                </span>
               </div>
             </div>
-
-            <div className="w-full pt-1">
-              <span className="sr-only">
-                {effectiveWatermark
-                  ? "Powered by FastCC QR"
-                  : "Watermark disabled"}
-              </span>
-            </div>
-          </div>
+          )}
         </section>
       </div>
     </main>

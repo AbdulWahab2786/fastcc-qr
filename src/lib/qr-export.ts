@@ -1,4 +1,12 @@
 import QRCode from "qrcode";
+import {
+  DEFAULT_QR_DOT_STYLE,
+  DEFAULT_QR_THEME_COLOR,
+  getQrThemeColorOption,
+  type QrDotStyle,
+  type QrLabelThemeId,
+  type QrThemeColorId,
+} from "@/lib/qr-label-themes";
 
 export type StudioLayoutPreset = "a4-poster" | "equipment-plate" | "thermal-sticker";
 
@@ -10,6 +18,20 @@ export interface StickerExportConfig {
   preset: StudioLayoutPreset;
   logoSrc: string | null;
   showWatermark: boolean;
+}
+
+export interface ThemedLabelExportConfig {
+  qrUrl: string;
+  shortCode: string;
+  title: string;
+  subtitle?: string;
+  folder?: string;
+  scheduleLabel?: string;
+  theme: QrLabelThemeId;
+  themeColor?: QrThemeColorId;
+  dotStyle?: QrDotStyle;
+  logoSrc?: string | null;
+  showWatermark?: boolean;
 }
 
 function triggerDownload(blob: Blob, filename: string): void {
@@ -189,6 +211,7 @@ export async function downloadQrPng(
   }
 }
 
+
 /** Downloads a standalone high-contrast QR code SVG. */
 export async function downloadQrSvg(
   qrUrl: string,
@@ -361,6 +384,425 @@ export async function downloadStickerPng(
   ctx.font = `700 ${config.preset === "a4-poster" ? 30 : 22}px ui-monospace, monospace`;
   ctx.textAlign = "center";
   ctx.fillText(`ID: ${config.shortCode}`, w / 2, idY);
+
+  const blob = await new Promise<Blob | null>((resolve) =>
+    canvas.toBlob((b) => resolve(b), "image/png"),
+  );
+  if (blob) {
+    triggerDownload(blob, filename);
+  }
+}
+
+/** Draws a crisp QR code onto a canvas, supporting both sharp square and soft rounded modules. */
+export async function drawQrToCanvas(
+  canvas: HTMLCanvasElement,
+  qrUrl: string,
+  size: number,
+  dotStyle: QrDotStyle = DEFAULT_QR_DOT_STYLE,
+): Promise<void> {
+  canvas.width = size;
+  canvas.height = size;
+
+  if (dotStyle === "square") {
+    await QRCode.toCanvas(canvas, qrUrl, {
+      errorCorrectionLevel: "H",
+      margin: 2,
+      width: size,
+      color: {
+        dark: "#0F172A",
+        light: "#FFFFFF",
+      },
+    });
+    return;
+  }
+
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+
+  const qr = QRCode.create(qrUrl, { errorCorrectionLevel: "H" });
+  const moduleCount = qr.modules.size;
+  const marginModules = 2;
+  const totalModules = moduleCount + marginModules * 2;
+  const cellSize = size / totalModules;
+
+  ctx.fillStyle = "#FFFFFF";
+  ctx.fillRect(0, 0, size, size);
+
+  ctx.fillStyle = "#0F172A";
+  const isFinderCell = (r: number, c: number): boolean =>
+    (r < 7 && c < 7) ||
+    (r < 7 && c >= moduleCount - 7) ||
+    (r >= moduleCount - 7 && c < 7);
+
+  for (let row = 0; row < moduleCount; row += 1) {
+    for (let col = 0; col < moduleCount; col += 1) {
+      if (!qr.modules.get(row, col)) continue;
+      const x = (col + marginModules) * cellSize;
+      const y = (row + marginModules) * cellSize;
+      if (isFinderCell(row, col)) {
+        ctx.fillRect(x, y, Math.ceil(cellSize), Math.ceil(cellSize));
+      } else {
+        const pad = cellSize * 0.08;
+        const w = cellSize - pad * 2;
+        const r = Math.max(1, w * 0.34);
+        drawRoundedRect(ctx, x + pad, y + pad, w, w, r);
+        ctx.fill();
+      }
+    }
+  }
+}
+
+/** Generates a QR code data URL for previewing, supporting dotStyle. */
+export async function generateQrDataUrl(
+  qrUrl: string,
+  size: number,
+  dotStyle: QrDotStyle = DEFAULT_QR_DOT_STYLE,
+): Promise<string> {
+  if (dotStyle === "square") {
+    return QRCode.toDataURL(qrUrl, {
+      errorCorrectionLevel: "H",
+      margin: 2,
+      width: size,
+      color: {
+        dark: "#0F172A",
+        light: "#FFFFFF",
+      },
+    });
+  }
+  const canvas = document.createElement("canvas");
+  await drawQrToCanvas(canvas, qrUrl, size, dotStyle);
+  return canvas.toDataURL("image/png");
+}
+
+function drawRoundedTopRect(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  radius: number,
+): void {
+  ctx.beginPath();
+  ctx.moveTo(x + radius, y);
+  ctx.lineTo(x + width - radius, y);
+  ctx.quadraticCurveTo(x + width, y, x + width, y + radius);
+  ctx.lineTo(x + width, y + height);
+  ctx.lineTo(x, y + height);
+  ctx.lineTo(x, y + radius);
+  ctx.quadraticCurveTo(x, y, x + radius, y);
+  ctx.closePath();
+}
+
+/**
+ * Renders and downloads a CaoLiao-style themed QR label card as a high-DPI PNG.
+ * Falls back to `downloadQrPng` (with dotStyle) when `theme === "classic"`.
+ */
+export async function downloadThemedLabelPng(
+  config: ThemedLabelExportConfig,
+  filename: string,
+): Promise<void> {
+  const dotStyle = config.dotStyle ?? DEFAULT_QR_DOT_STYLE;
+  const colorOpt = getQrThemeColorOption(
+    config.themeColor ?? DEFAULT_QR_THEME_COLOR,
+  );
+  const titleText = config.title.trim() || "Operations SOP";
+  const subtitleText = config.subtitle?.trim() || "Scan for SOP & Logs";
+  const folderText = config.folder?.trim() || "";
+  const scheduleText = config.scheduleLabel?.trim() || "";
+  const showWatermark = Boolean(config.showWatermark);
+
+  if (config.theme === "classic") {
+    const size = 1024;
+    const canvas = document.createElement("canvas");
+    await drawQrToCanvas(canvas, config.qrUrl, size, dotStyle);
+    if (config.logoSrc) {
+      const ctx = canvas.getContext("2d");
+      if (ctx) {
+        try {
+          const img = await loadImage(config.logoSrc);
+          drawContainedLogo(ctx, img, 0, 0, size, 12);
+        } catch {
+          // Ignore logo load failures.
+        }
+      }
+    }
+    const blob = await new Promise<Blob | null>((resolve) =>
+      canvas.toBlob((b) => resolve(b), "image/png"),
+    );
+    if (blob) triggerDownload(blob, filename);
+    return;
+  }
+
+  const qrCanvas = document.createElement("canvas");
+  const isHorizontal = config.theme === "horizontal-card";
+  const w = isHorizontal ? 1600 : 1200;
+  const h = isHorizontal ? 960 : 1600;
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+
+  // Outer canvas background
+  ctx.fillStyle = "#FFFFFF";
+  ctx.fillRect(0, 0, w, h);
+
+  if (config.theme === "simple-tag") {
+    // Card border
+    const pad = 48;
+    const cardW = w - pad * 2;
+    const cardH = h - pad * 2;
+    ctx.fillStyle = "#FFFFFF";
+    drawRoundedRect(ctx, pad, pad, cardW, cardH, 36);
+    ctx.fill();
+    ctx.strokeStyle = "#CBD5E1";
+    ctx.lineWidth = 4;
+    ctx.stroke();
+
+    // Solid accent top header bar
+    const headerH = 260;
+    ctx.save();
+    drawRoundedTopRect(ctx, pad, pad, cardW, headerH, 36);
+    ctx.fillStyle = colorOpt.hex;
+    ctx.fill();
+    ctx.restore();
+
+    // Header title & ID pill
+    ctx.fillStyle = "#FFFFFF";
+    ctx.font = "700 50px system-ui, -apple-system, sans-serif";
+    ctx.textAlign = "center";
+    const titleLines = wrapCanvasText(ctx, titleText, cardW - 140, 2);
+    let ty = pad + (titleLines.length > 1 ? 105 : 132);
+    for (const line of titleLines) {
+      ctx.fillText(line, w / 2, ty);
+      ty += 60;
+    }
+
+    ctx.font = "600 26px ui-monospace, monospace";
+    ctx.fillStyle = "rgba(255,255,255,0.88)";
+    ctx.fillText(`ID: ${config.shortCode}`, w / 2, pad + headerH - 36);
+
+    // Centered QR
+    const qrSize = 740;
+    await drawQrToCanvas(qrCanvas, config.qrUrl, qrSize, dotStyle);
+    const qrX = Math.round((w - qrSize) / 2);
+    const qrY = pad + headerH + 85;
+    ctx.drawImage(qrCanvas, qrX, qrY);
+
+    if (config.logoSrc) {
+      try {
+        const logoImg = await loadImage(config.logoSrc);
+        drawContainedLogo(ctx, logoImg, qrX, qrY, qrSize, 12);
+      } catch {
+        // Ignore logo load failures.
+      }
+    }
+
+    // 2 clean caption lines below
+    const captionBaseY = qrY + qrSize + 82;
+    const line1 =
+      folderText && folderText.toLowerCase() !== "unassigned"
+        ? folderText
+        : scheduleText || "Standard Operating Procedure";
+    ctx.fillStyle = "#0F172A";
+    ctx.font = "700 36px system-ui, -apple-system, sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText(line1, w / 2, captionBaseY, cardW - 120);
+
+    ctx.fillStyle = "#475569";
+    ctx.font = "500 30px system-ui, -apple-system, sans-serif";
+    ctx.fillText(subtitleText, w / 2, captionBaseY + 54, cardW - 120);
+
+    if (showWatermark) {
+      ctx.fillStyle = "#64748B";
+      ctx.font = "600 24px system-ui, -apple-system, sans-serif";
+      ctx.fillText("Powered by FastCC QR", w / 2, pad + cardH - 42);
+    }
+  } else if (config.theme === "equipment-inspection") {
+    const pad = 48;
+    const cardW = w - pad * 2;
+    const cardH = h - pad * 2;
+
+    // Bold accent outer frame with subtle arch
+    ctx.fillStyle = colorOpt.hex;
+    drawRoundedRect(ctx, pad, pad, cardW, cardH, 48);
+    ctx.fill();
+
+    // Subtle arched top highlight
+    ctx.save();
+    ctx.beginPath();
+    ctx.ellipse(w / 2, pad + 180, cardW * 0.62, 220, 0, Math.PI, 0);
+    ctx.fillStyle = colorOpt.darkHex;
+    ctx.globalAlpha = 0.25;
+    ctx.fill();
+    ctx.restore();
+
+    // Top Header: EQUIPMENT INSPECTION
+    ctx.fillStyle = "#FFFFFF";
+    ctx.font = "800 44px system-ui, -apple-system, sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText("EQUIPMENT INSPECTION", w / 2, pad + 120);
+
+    ctx.fillStyle = "rgba(255,255,255,0.85)";
+    ctx.font = "600 26px ui-monospace, monospace";
+    ctx.fillText(`ASSET ID: ${config.shortCode}`, w / 2, pad + 170);
+
+    // Crisp white rounded QR box in the center
+    const qrBoxPad = 48;
+    const qrSize = 720;
+    const qrBoxSize = qrSize + qrBoxPad * 2;
+    const qrBoxX = Math.round((w - qrBoxSize) / 2);
+    const qrBoxY = pad + 230;
+
+    ctx.fillStyle = "#FFFFFF";
+    drawRoundedRect(ctx, qrBoxX, qrBoxY, qrBoxSize, qrBoxSize, 36);
+    ctx.fill();
+
+    await drawQrToCanvas(qrCanvas, config.qrUrl, qrSize, dotStyle);
+    const qrX = qrBoxX + qrBoxPad;
+    const qrY = qrBoxY + qrBoxPad;
+    ctx.drawImage(qrCanvas, qrX, qrY);
+
+    if (config.logoSrc) {
+      try {
+        const logoImg = await loadImage(config.logoSrc);
+        drawContainedLogo(ctx, logoImg, qrX, qrY, qrSize, 12);
+      } catch {
+        // Ignore logo load failures.
+      }
+    }
+
+    // Asset name + schedule/folder at the bottom
+    const bottomY = qrBoxY + qrBoxSize + 96;
+    ctx.fillStyle = "#FFFFFF";
+    ctx.font = "700 48px system-ui, -apple-system, sans-serif";
+    ctx.textAlign = "center";
+    const titleLines = wrapCanvasText(ctx, titleText, cardW - 140, 2);
+    let cy = bottomY;
+    for (const line of titleLines) {
+      ctx.fillText(line, w / 2, cy);
+      cy += 58;
+    }
+
+    const metaParts = [
+      folderText && folderText.toLowerCase() !== "unassigned"
+        ? folderText
+        : "",
+      scheduleText || "",
+    ].filter(Boolean);
+    const metaLine =
+      metaParts.length > 0 ? metaParts.join("  •  ") : subtitleText;
+
+    ctx.fillStyle = "rgba(255,255,255,0.9)";
+    ctx.font = "500 30px system-ui, -apple-system, sans-serif";
+    ctx.fillText(metaLine, w / 2, cy + 16, cardW - 140);
+
+    if (showWatermark) {
+      ctx.fillStyle = "rgba(255,255,255,0.75)";
+      ctx.font = "600 22px system-ui, -apple-system, sans-serif";
+      ctx.fillText("Powered by FastCC QR", w / 2, pad + cardH - 36);
+    }
+  } else if (config.theme === "horizontal-card") {
+    const pad = 56;
+    const cardW = w - pad * 2;
+    const cardH = h - pad * 2;
+
+    // Card background + border
+    ctx.fillStyle = "#FFFFFF";
+    drawRoundedRect(ctx, pad, pad, cardW, cardH, 36);
+    ctx.fill();
+    ctx.strokeStyle = "#CBD5E1";
+    ctx.lineWidth = 4;
+    ctx.stroke();
+
+    // Left accent stripe
+    ctx.save();
+    drawRoundedRect(ctx, pad, pad, cardW, cardH, 36);
+    ctx.clip();
+    ctx.fillStyle = colorOpt.hex;
+    ctx.fillRect(pad, pad, 34, cardH);
+    ctx.restore();
+
+    // Right side QR code
+    const qrSize = 620;
+    const qrX = pad + cardW - qrSize - 80;
+    const qrY = Math.round((h - qrSize) / 2);
+
+    ctx.fillStyle = "#FFFFFF";
+    drawRoundedRect(ctx, qrX - 24, qrY - 24, qrSize + 48, qrSize + 48, 24);
+    ctx.fill();
+    ctx.strokeStyle = "#E2E8F0";
+    ctx.lineWidth = 3;
+    ctx.stroke();
+
+    await drawQrToCanvas(qrCanvas, config.qrUrl, qrSize, dotStyle);
+    ctx.drawImage(qrCanvas, qrX, qrY);
+
+    if (config.logoSrc) {
+      try {
+        const logoImg = await loadImage(config.logoSrc);
+        drawContainedLogo(ctx, logoImg, qrX, qrY, qrSize, 12);
+      } catch {
+        // Ignore logo load failures.
+      }
+    }
+
+    // Left side text
+    const leftX = pad + 96;
+    const leftMaxW = qrX - leftX - 72;
+
+    // Folder / Category pill
+    const pillText =
+      folderText && folderText.toLowerCase() !== "unassigned"
+        ? folderText.toUpperCase()
+        : "ASSET / SOP LABEL";
+    ctx.fillStyle = colorOpt.tintHex;
+    drawRoundedRect(ctx, leftX, pad + 110, Math.min(leftMaxW, 440), 58, 14);
+    ctx.fill();
+    ctx.fillStyle = colorOpt.hex;
+    ctx.font = "700 24px ui-monospace, monospace";
+    ctx.textAlign = "left";
+    ctx.fillText(pillText, leftX + 24, pad + 148, Math.min(leftMaxW, 400));
+
+    // Bold Asset Title
+    ctx.fillStyle = "#0F172A";
+    ctx.font = "700 62px system-ui, -apple-system, sans-serif";
+    const titleLines = wrapCanvasText(ctx, titleText, leftMaxW, 3);
+    let ty = pad + 260;
+    for (const line of titleLines) {
+      ctx.fillText(line, leftX, ty);
+      ty += 76;
+    }
+
+    // Description / Subtitle
+    ctx.fillStyle = "#475569";
+    ctx.font = "500 32px system-ui, -apple-system, sans-serif";
+    const subLines = wrapCanvasText(ctx, subtitleText, leftMaxW, 2);
+    let sy = ty + 24;
+    for (const line of subLines) {
+      ctx.fillText(line, leftX, sy);
+      sy += 44;
+    }
+
+    // Status / ID footer on left
+    const footerY = pad + cardH - 110;
+    ctx.fillStyle = "#0F172A";
+    ctx.font = "700 32px ui-monospace, monospace";
+    ctx.fillText(`ID: ${config.shortCode}`, leftX, footerY);
+
+    if (scheduleText) {
+      ctx.fillStyle = colorOpt.hex;
+      ctx.font = "600 26px system-ui, -apple-system, sans-serif";
+      ctx.fillText(scheduleText, leftX, footerY + 42);
+    }
+
+    if (showWatermark) {
+      ctx.fillStyle = "#64748B";
+      ctx.font = "600 22px system-ui, -apple-system, sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillText("Powered by FastCC QR", qrX + qrSize / 2, qrY + qrSize + 52);
+    }
+  }
 
   const blob = await new Promise<Blob | null>((resolve) =>
     canvas.toBlob((b) => resolve(b), "image/png"),
