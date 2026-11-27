@@ -17,6 +17,8 @@ export interface PlanSpec {
   watermarkRemoval: boolean;
   customLogo: boolean;
   csvExport: boolean;
+  a4BulkPrint: boolean;
+  auditPdfMaxLogs: number | null;
 }
 
 export const PLAN_SPECS: Record<PlanTier, PlanSpec> = {
@@ -30,6 +32,8 @@ export const PLAN_SPECS: Record<PlanTier, PlanSpec> = {
     watermarkRemoval: false,
     customLogo: false,
     csvExport: false,
+    a4BulkPrint: false,
+    auditPdfMaxLogs: 5,
   },
   pro: {
     id: "pro",
@@ -41,6 +45,8 @@ export const PLAN_SPECS: Record<PlanTier, PlanSpec> = {
     watermarkRemoval: true,
     customLogo: true,
     csvExport: true,
+    a4BulkPrint: true,
+    auditPdfMaxLogs: null,
   },
   business: {
     id: "business",
@@ -52,6 +58,8 @@ export const PLAN_SPECS: Record<PlanTier, PlanSpec> = {
     watermarkRemoval: true,
     customLogo: true,
     csvExport: true,
+    a4BulkPrint: true,
+    auditPdfMaxLogs: null,
   },
 };
 
@@ -88,4 +96,16 @@ export function getAiSopLimit(plan: PlanTier): number | null {
 
 export function getQrLimit(plan: PlanTier): number | null {
   return PLAN_SPECS[plan].qrLimit;
+}
+
+export function canUseA4BulkPrint(plan: PlanTier): boolean {
+  return PLAN_SPECS[plan].a4BulkPrint;
+}
+
+export function canExportCsv(plan: PlanTier): boolean {
+  return PLAN_SPECS[plan].csvExport;
+}
+
+export function getAuditPdfMaxLogs(plan: PlanTier): number | null {
+  return PLAN_SPECS[plan].auditPdfMaxLogs;
 }

@@ -1,5 +1,6 @@
 import { jsPDF } from "jspdf";
 import QRCode from "qrcode";
+import { canUseA4BulkPrint } from "@/lib/billing/constants";
 import type { Json, PlanTier } from "@/types/database";
 import type { QrCodeRow } from "@/types/qr";
 
@@ -177,6 +178,11 @@ export async function generateA4StickerSheetPdf(
   options: A4PrintSheetOptions,
 ): Promise<void> {
   const { qrs, density, showCutLines, footerLabel, plan } = options;
+  if (!canUseA4BulkPrint(plan)) {
+    throw new Error(
+      "A4 Bulk Sticker Sheet PDF is available on Pro and Business plans.",
+    );
+  }
   if (qrs.length === 0) return;
 
   const layout = GRID_LAYOUTS[density];

@@ -1,4 +1,5 @@
 import { jsPDF } from "jspdf";
+import { getAuditPdfMaxLogs } from "@/lib/billing/constants";
 import type { EquipmentStatus, Json, PlanTier } from "@/types/database";
 import type { InspectionLogRow, QrCodeRow } from "@/types/qr";
 
@@ -257,11 +258,15 @@ export function exportAuditReportPdf(
   const sortedLogs = [...logs].sort(
     (a, b) => Date.parse(a.created_at) - Date.parse(b.created_at),
   );
+  const maxLogs = getAuditPdfMaxLogs(plan);
+  const isFreePlan = maxLogs !== null;
+  const visibleLogs =
+    maxLogs !== null ? sortedLogs.slice(-maxLogs) : sortedLogs;
 
   let okCount = 0;
   let maintenanceCount = 0;
   let faultyCount = 0;
-  for (const log of sortedLogs) {
+  for (const log of visibleLogs) {
     const eqStatus = resolveLogEquipmentStatus(log);
     if (eqStatus === "ok") okCount += 1;
     else if (eqStatus === "maintenance") maintenanceCount += 1;
@@ -273,7 +278,7 @@ export function exportAuditReportPdf(
   const category = toPdfAscii(qr.category || "general");
   const generatedLabel = formatDateTime(new Date().toISOString());
   const dateRangeLabel = toPdfAscii(
-    options?.dateRangeLabel ?? getAuditDateRangeLabel("all", sortedLogs),
+    options?.dateRangeLabel ?? getAuditDateRangeLabel("all", visibleLogs),
   );
   const currentStatusMeta = getStatusDisplay(qr.current_status ?? "ok");
 
@@ -337,6 +342,18 @@ export function exportAuditReportPdf(
     cursorY,
   );
 
+  if (isFreePlan) {
+    cursorY += 4.5;
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(7.5);
+    doc.setTextColor(180, 83, 9);
+    doc.text(
+      `Free Preview (Limited to latest ${maxLogs} logs) - Upgrade to Pro for full audit history & clean PDF.`,
+      MARGIN_X_MM,
+      cursorY,
+    );
+  }
+
   cursorY += 4.5;
   doc.setDrawColor(226, 232, 240);
   doc.setLineWidth(0.3);
@@ -352,7 +369,7 @@ export function exportAuditReportPdf(
     value: number;
     rgb: [number, number, number];
   }[] = [
-    { label: "TOTAL INSPECTIONS", value: sortedLogs.length, rgb: [15, 23, 42] },
+    { label: "TOTAL INSPECTIONS", value: visibleLogs.length, rgb: [15, 23, 42] },
     { label: "OK", value: okCount, rgb: [22, 163, 74] },
     { label: "MAINTENANCE", value: maintenanceCount, rgb: [180, 83, 9] },
     { label: "FAULTY", value: faultyCount, rgb: [220, 38, 38] },
@@ -407,7 +424,7 @@ export function exportAuditReportPdf(
 
   cursorY = drawTableHeader(cursorY);
 
-  if (sortedLogs.length === 0) {
+  if (visibleLogs.length === 0) {
     doc.setFont("helvetica", "normal");
     doc.setFontSize(9.5);
     doc.setTextColor(100, 116, 139);
@@ -418,8 +435,8 @@ export function exportAuditReportPdf(
       { align: "center" },
     );
   } else {
-    for (let idx = 0; idx < sortedLogs.length; idx += 1) {
-      const log = sortedLogs[idx];
+    for (let idx = 0; idx < visibleLogs.length; idx += 1) {
+      const log = visibleLogs[idx];
       const eqStatus = resolveLogEquipmentStatus(log);
       const statusMeta = getStatusDisplay(eqStatus);
       const signatureUrl = extractSignatureDataUrl(log.step_results);
@@ -597,7 +614,6 @@ export function exportAuditReportPdf(
 
   // Page numbers & plan-based subtle footer on every page
   const totalPages = doc.getNumberOfPages();
-  const isFreePlan = plan === "free";
 
   for (let page = 1; page <= totalPages; page += 1) {
     doc.setPage(page);
@@ -606,11 +622,15 @@ export function exportAuditReportPdf(
     doc.line(MARGIN_X_MM, 283, A4_WIDTH_MM - MARGIN_X_MM, 283);
 
     doc.setFont("helvetica", "normal");
-    doc.setFontSize(7.5);
+    doc.setFontSize(7);
     doc.setTextColor(100, 116, 139);
 
     if (isFreePlan) {
-      doc.text("Powered by FastCC QR", MARGIN_X_MM, 288);
+      doc.text(
+        `Free Preview (Limited to latest ${maxLogs} logs) - Powered by FastCC QR. Upgrade to Pro for full audit history & clean PDF.`,
+        MARGIN_X_MM,
+        288,
+      );
     }
 
     doc.text(

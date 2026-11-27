@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { generateA4StickerSheetPdf } from "@/lib/a4-print-sheet";
 import {
+  canUseA4BulkPrint,
   getQrLimit,
   isPaidPlan,
   PLAN_SPECS,
@@ -63,6 +64,9 @@ export function BulkImportModal({
   const [importedQrs, setImportedQrs] = useState<QrCodeRow[] | null>(null);
   const [isPrinting, setIsPrinting] = useState(false);
   const [printError, setPrintError] = useState<string | null>(null);
+  const [showPrintUpgradePrompt, setShowPrintUpgradePrompt] = useState(false);
+
+  const allowA4Print = canUseA4BulkPrint(plan);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -96,6 +100,7 @@ export function BulkImportModal({
     setImportError(null);
     setImportedQrs(null);
     setPrintError(null);
+    setShowPrintUpgradePrompt(false);
   }
 
   function handleClose() {
@@ -267,6 +272,10 @@ export function BulkImportModal({
   }
 
   async function handlePrintImportedPdf() {
+    if (!allowA4Print) {
+      setShowPrintUpgradePrompt(true);
+      return;
+    }
     if (!importedQrs || importedQrs.length === 0 || isPrinting) return;
     setPrintError(null);
     setIsPrinting(true);
@@ -369,8 +378,17 @@ export function BulkImportModal({
                       </>
                     ) : (
                       <>
-                        <Printer className="h-3.5 w-3.5" />
+                        {allowA4Print ? (
+                          <Printer className="h-3.5 w-3.5" />
+                        ) : (
+                          <Lock className="h-3.5 w-3.5" />
+                        )}
                         <span>Print Imported QRs (A4 PDF)</span>
+                        {!allowA4Print ? (
+                          <span className="rounded bg-white/20 px-1.5 py-0.5 font-mono text-[10px] font-semibold uppercase text-white">
+                            Pro
+                          </span>
+                        ) : null}
                       </>
                     )}
                   </button>
@@ -384,6 +402,28 @@ export function BulkImportModal({
                   </button>
                 </div>
               </div>
+
+              {showPrintUpgradePrompt && !allowA4Print ? (
+                <div
+                  role="alert"
+                  className="flex flex-col gap-3 rounded-lg border border-utility-blue/30 bg-utility-blue/5 px-4 py-3 text-xs text-ink sm:flex-row sm:items-center sm:justify-between"
+                >
+                  <div className="flex items-center gap-2">
+                    <Lock className="h-4 w-4 shrink-0 text-utility-blue" />
+                    <span>
+                      A4 Bulk Sticker Sheet PDF is available on Pro (₹999/mo) and
+                      Business plans.
+                    </span>
+                  </div>
+                  <Link
+                    href="/pricing"
+                    className="inline-flex w-fit shrink-0 items-center gap-1.5 rounded-lg bg-action-green px-3.5 py-1.5 text-xs font-semibold text-white transition-opacity hover:opacity-95"
+                  >
+                    <span>Upgrade to Pro</span>
+                    <ArrowRight className="h-3.5 w-3.5" />
+                  </Link>
+                </div>
+              ) : null}
 
               {printError ? (
                 <div

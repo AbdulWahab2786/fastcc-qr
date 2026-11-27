@@ -38,7 +38,7 @@ import {
   resolveLogEquipmentStatus,
   type AuditDateRange,
 } from "@/lib/audit-report-export";
-import { isPaidPlan } from "@/lib/billing/constants";
+import { canExportCsv, isPaidPlan } from "@/lib/billing/constants";
 import {
   getQrSchedule,
   INSPECTION_SCHEDULE_OPTIONS,
@@ -539,6 +539,16 @@ export function StudioClient({
   }
 
   async function handleExportAudit(format: "pdf" | "csv") {
+    const effectivePlan = userPlan ?? "free";
+    if (format === "csv" && (!isPaidUser || !canExportCsv(effectivePlan))) {
+      setShowProPrompt(true);
+      setAuditMessage({
+        text: "CSV Audit Export is available on Pro (₹999/mo) and Business plans.",
+        tone: "info",
+      });
+      return;
+    }
+
     setAuditMessage(null);
     setExportingAudit(format);
 
@@ -1232,14 +1242,37 @@ export function StudioClient({
                   >
                     {exportingAudit === "csv" ? (
                       <Loader2 className="h-4 w-4 animate-spin text-action-green" />
-                    ) : (
+                    ) : isPaidUser ? (
                       <Download className="h-4 w-4 text-action-green" />
+                    ) : (
+                      <Lock className="h-4 w-4 text-utility-blue" />
                     )}
                     <span>
                       {exportingAudit === "csv" ? "Exporting..." : "Export CSV"}
                     </span>
+                    {!isPaidUser ? (
+                      <span className="rounded bg-action-green/10 px-1.5 py-0.5 font-mono text-[10px] font-semibold uppercase text-action-green">
+                        Pro
+                      </span>
+                    ) : null}
                   </button>
                 </div>
+
+                {!isPaidUser && showProPrompt ? (
+                  <div className="flex items-center justify-between gap-2 rounded-lg border border-utility-blue/30 bg-utility-blue/5 px-3 py-2 text-xs text-ink">
+                    <span>
+                      {isAuthenticated
+                        ? "Upgrade to Pro to export CSV audit logs and unlock full PDF history."
+                        : "Sign in and upgrade to Pro to export CSV audit logs."}
+                    </span>
+                    <Link
+                      href="/pricing"
+                      className="shrink-0 font-semibold text-utility-blue hover:underline"
+                    >
+                      Upgrade
+                    </Link>
+                  </div>
+                ) : null}
 
                 {auditMessage ? (
                   <div

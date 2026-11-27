@@ -44,6 +44,8 @@ import {
   type AuditDateRange,
 } from "@/lib/audit-report-export";
 import {
+  canExportCsv,
+  canUseA4BulkPrint,
   FREE_QR_LIMIT,
   getAiSopLimit,
   isPaidPlan,
@@ -188,6 +190,7 @@ export function DashboardClient({
   const [folderFilter, setFolderFilter] = useState<string>("all");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   const [isBulkPrintOpen, setIsBulkPrintOpen] = useState(false);
+  const [bulkPrintUpgradePrompt, setBulkPrintUpgradePrompt] = useState(false);
   const [isBulkImportOpen, setIsBulkImportOpen] = useState(false);
   const [launchingTemplateId, setLaunchingTemplateId] = useState<string | null>(
     null,
@@ -213,6 +216,8 @@ export function DashboardClient({
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const isPaid = isPaidPlan(plan);
+  const allowA4Print = canUseA4BulkPrint(plan);
+  const allowCsvExport = canExportCsv(plan);
   const planSpec = PLAN_SPECS[plan];
   const aiLimit = getAiSopLimit(plan);
 
@@ -479,6 +484,14 @@ export function DashboardClient({
   }
 
   async function handleAuditExport(qr: QrCodeRow, format: "pdf" | "csv") {
+    if (format === "csv" && !allowCsvExport) {
+      setCsvUpgradePrompt(true);
+      setTemplateUpgradePrompt(
+        "CSV Inspection Log export is available on Pro (₹999/mo) and Business plans.",
+      );
+      return;
+    }
+
     const key = `${qr.id}:${format}`;
     setExportingAuditKey(key);
     setAuditToast(null);
@@ -1117,10 +1130,17 @@ export function DashboardClient({
                             >
                               {exportingAuditKey === `${qr.id}:csv` ? (
                                 <Loader2 className="h-3.5 w-3.5 animate-spin text-action-green" />
-                              ) : (
+                              ) : allowCsvExport ? (
                                 <Download className="h-3.5 w-3.5 text-action-green" />
+                              ) : (
+                                <Lock className="h-3.5 w-3.5 text-utility-blue" />
                               )}
                               <span>Export CSV</span>
+                              {!allowCsvExport ? (
+                                <span className="rounded bg-action-green/10 px-1.5 py-0.5 font-mono text-[10px] font-semibold uppercase text-action-green">
+                                  Pro
+                                </span>
+                              ) : null}
                             </button>
                             <Link
                               href={`/studio/${qr.short_code}`}
@@ -1426,27 +1446,75 @@ export function DashboardClient({
           aria-label="Bulk QR actions"
           className="fixed inset-x-0 bottom-4 z-40 mx-auto max-w-2xl px-4"
         >
-          <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-surface px-4 py-3 shadow-lg">
-            <span className="font-mono text-xs font-semibold text-ink">
-              {selectedQrs.length} {selectedQrs.length === 1 ? "QR" : "QRs"}{" "}
-              selected
-            </span>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={handleClearSelection}
-                className="rounded-lg border border-border bg-surface px-3 py-1.5 text-xs font-medium text-ink-muted transition-colors hover:bg-canvas-muted hover:text-ink"
+          <div className="space-y-2.5 rounded-xl border border-border bg-surface px-4 py-3 shadow-lg">
+            {bulkPrintUpgradePrompt && !allowA4Print ? (
+              <div
+                role="alert"
+                className="flex flex-col gap-2.5 rounded-lg border border-utility-blue/30 bg-utility-blue/5 px-3 py-2.5 text-xs text-ink sm:flex-row sm:items-center sm:justify-between"
               >
-                Clear
-              </button>
-              <button
-                type="button"
-                onClick={() => setIsBulkPrintOpen(true)}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-action-green px-4 py-1.5 text-xs font-semibold text-white transition-opacity hover:opacity-95"
-              >
-                <Printer className="h-3.5 w-3.5" />
-                <span>Print A4 Sticker Sheet</span>
-              </button>
+                <div className="flex items-center gap-2">
+                  <Lock className="h-3.5 w-3.5 shrink-0 text-utility-blue" />
+                  <span>
+                    A4 Bulk Sticker Sheet PDF is available on Pro (₹999/mo) and
+                    Business plans.
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Link
+                    href="/pricing"
+                    className="inline-flex w-fit shrink-0 items-center gap-1 rounded-lg bg-action-green px-3 py-1.5 text-xs font-semibold text-white transition-opacity hover:opacity-95"
+                  >
+                    <span>Upgrade to Pro</span>
+                    <ArrowRight className="h-3.5 w-3.5" />
+                  </Link>
+                  <button
+                    type="button"
+                    onClick={() => setBulkPrintUpgradePrompt(false)}
+                    aria-label="Dismiss upgrade prompt"
+                    className="rounded p-1 text-ink-muted transition-colors hover:bg-canvas-muted hover:text-ink"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              </div>
+            ) : null}
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <span className="font-mono text-xs font-semibold text-ink">
+                {selectedQrs.length} {selectedQrs.length === 1 ? "QR" : "QRs"}{" "}
+                selected
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleClearSelection}
+                  className="rounded-lg border border-border bg-surface px-3 py-1.5 text-xs font-medium text-ink-muted transition-colors hover:bg-canvas-muted hover:text-ink"
+                >
+                  Clear
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!allowA4Print) {
+                      setBulkPrintUpgradePrompt(true);
+                      return;
+                    }
+                    setIsBulkPrintOpen(true);
+                  }}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-action-green px-4 py-1.5 text-xs font-semibold text-white transition-opacity hover:opacity-95"
+                >
+                  {allowA4Print ? (
+                    <Printer className="h-3.5 w-3.5" />
+                  ) : (
+                    <Lock className="h-3.5 w-3.5" />
+                  )}
+                  <span>Print A4 Sticker Sheet</span>
+                  {!allowA4Print ? (
+                    <span className="rounded bg-white/20 px-1.5 py-0.5 font-mono text-[10px] font-semibold uppercase text-white">
+                      Pro
+                    </span>
+                  ) : null}
+                </button>
+              </div>
             </div>
           </div>
         </div>
