@@ -85,6 +85,7 @@ export interface WorkerStrings {
   photoAttachedPrefix: string;
   notesObservations: string;
   notesPlaceholder: string;
+  quickIssueChips: readonly [string, string, string, string, string, string];
   workerDigitalSignature: string;
   signedBadge: string;
   clear: string;
@@ -163,6 +164,14 @@ const DICTIONARY: Record<WorkerLang, WorkerStrings> = {
     photoAttachedPrefix: "Photo attached:",
     notesObservations: "Notes / Observations",
     notesPlaceholder: "Any defect or shift note...",
+    quickIssueChips: [
+      "Leakage",
+      "Unusual Noise",
+      "Damaged Part",
+      "Power / Electrical",
+      "Calibration Needed",
+      "Safety Hazard",
+    ],
     workerDigitalSignature: "Worker Digital Signature",
     signedBadge: "Signed",
     clear: "Clear",
@@ -238,6 +247,14 @@ const DICTIONARY: Record<WorkerLang, WorkerStrings> = {
     photoAttachedPrefix: "फ़ोटो जुड़ी:",
     notesObservations: "नोट्स / टिप्पणी",
     notesPlaceholder: "कोई खराबी या शिफ्ट की बात लिखें...",
+    quickIssueChips: [
+      "लीकेज / रिसाव",
+      "अजीब आवाज़",
+      "टूटा हुआ हिस्सा",
+      "बिजली / पावर खराबी",
+      "कैलिब्रेशन ज़रूरी",
+      "सुरक्षा खतरा",
+    ],
     workerDigitalSignature: "कर्मचारी के डिजिटल हस्ताक्षर",
     signedBadge: "हस्ताक्षर हो गए",
     clear: "साफ़ करें",
@@ -313,6 +330,14 @@ const DICTIONARY: Record<WorkerLang, WorkerStrings> = {
     photoAttachedPrefix: "ఫోటో జతచేయబడింది:",
     notesObservations: "గమనికలు / పరిశీలనలు",
     notesPlaceholder: "ఏదైనా లోపం లేదా షిఫ్ట్ నోట్ రాయండి...",
+    quickIssueChips: [
+      "లీకేజ్",
+      "అసాధారణ శబ్దం",
+      "దెబ్బతిన్న భాగం",
+      "పవర్ / ఎలక్ట్రికల్",
+      "కాలిబ్రేషన్ అవసరం",
+      "భద్రతా ప్రమాదం",
+    ],
     workerDigitalSignature: "ఉద్యోగి డిజిటల్ సంతకం",
     signedBadge: "సంతకం అయింది",
     clear: "తొలగించు",
@@ -388,6 +413,14 @@ const DICTIONARY: Record<WorkerLang, WorkerStrings> = {
     photoAttachedPrefix: "फोटो जोडला:",
     notesObservations: "नोंदी / निरीक्षणे",
     notesPlaceholder: "काही दोष किंवा शिफ्टची नोंद लिहा...",
+    quickIssueChips: [
+      "गळती / लीकेज",
+      "असामान्य आवाज",
+      "खराब / तुटलेला भाग",
+      "वीज / इलेक्ट्रिकल",
+      "कॅलिब्रेशन आवश्यक",
+      "सुरक्षा धोका",
+    ],
     workerDigitalSignature: "कामगाराची डिजिटल सही",
     signedBadge: "सही झाली",
     clear: "पुसा",
@@ -463,6 +496,14 @@ const DICTIONARY: Record<WorkerLang, WorkerStrings> = {
     photoAttachedPrefix: "புகைப்படம் இணைக்கப்பட்டது:",
     notesObservations: "குறிப்புகள் / அவதானிப்புகள்",
     notesPlaceholder: "ஏதேனும் பழுது அல்லது ஷிப்ட் குறிப்பு...",
+    quickIssueChips: [
+      "கசிவு",
+      "அசாதாரண சத்தம்",
+      "சேதமடைந்த பாகம்",
+      "மின்சாரம் / பவர்",
+      "அளவுத்திருத்தம் தேவை",
+      "பாதுகாப்பு அபாயம்",
+    ],
     workerDigitalSignature: "பணியாளர் டிஜிட்டல் கையொப்பம்",
     signedBadge: "கையொப்பமிடப்பட்டது",
     clear: "அழி",

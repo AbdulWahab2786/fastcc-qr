@@ -747,24 +747,61 @@ export function DashboardClient({
         </div>
       </section>
 
-      {/* My QR Codes */}
+      {/* Equipment & SOP QR Codes */}
       <section aria-labelledby="my-qr-heading" className="mb-10">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <h2
-              id="my-qr-heading"
-              className="text-base font-semibold tracking-tight text-ink"
-            >
-              My QR Codes
-            </h2>
-            <span className="font-mono text-xs text-ink-muted">
-              {filteredQrCodes.length}{" "}
-              {filteredQrCodes.length === 1 ? "record" : "records"}
-            </span>
+          <div>
+            <div className="flex items-center gap-3">
+              <h2
+                id="my-qr-heading"
+                className="text-base font-semibold tracking-tight text-ink"
+              >
+                Equipment &amp; SOP QR Codes
+              </h2>
+              <span className="font-mono text-xs text-ink-muted">
+                {filteredQrCodes.length}{" "}
+                {filteredQrCodes.length === 1 ? "record" : "records"}
+              </span>
+            </div>
+            <p className="text-xs text-ink-muted">
+              Select items below to print A4 sticker sheets
+            </p>
           </div>
 
           {qrCodes.length > 0 ? (
             <div className="flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                disabled={allowA4Print && selectedQrs.length === 0}
+                title={
+                  !allowA4Print
+                    ? "Upgrade to Pro to print A4 sticker sheets"
+                    : selectedQrs.length === 0
+                      ? "Select 1+ QR codes to print"
+                      : "Print A4 sticker sheets for selected QR codes"
+                }
+                onClick={() => {
+                  if (!allowA4Print) {
+                    setBulkPrintUpgradePrompt(true);
+                    return;
+                  }
+                  if (selectedQrs.length === 0) return;
+                  setIsBulkPrintOpen(true);
+                }}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-1.5 text-xs font-semibold text-ink transition-colors hover:bg-canvas-muted disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {allowA4Print ? (
+                  <Printer className="h-3.5 w-3.5 text-action-green" />
+                ) : (
+                  <Lock className="h-3.5 w-3.5 text-utility-blue" />
+                )}
+                <span>Print A4 Stickers</span>
+                {!allowA4Print ? (
+                  <span className="rounded bg-action-green/10 px-1.5 py-0.5 font-mono text-[10px] font-semibold uppercase text-action-green">
+                    Pro
+                  </span>
+                ) : null}
+              </button>
               <div
                 role="group"
                 aria-label="Audit report date range"
@@ -864,6 +901,38 @@ export function DashboardClient({
             </div>
           ) : null}
         </div>
+
+        {bulkPrintUpgradePrompt && !allowA4Print ? (
+          <div
+            role="alert"
+            className="mb-4 flex flex-col gap-3 rounded-lg border border-utility-blue/30 bg-utility-blue/5 px-4 py-3 text-xs text-ink sm:flex-row sm:items-center sm:justify-between"
+          >
+            <div className="flex items-center gap-2">
+              <Lock className="h-4 w-4 shrink-0 text-utility-blue" />
+              <span>
+                A4 Bulk Sticker Sheet PDF is available on Pro (₹999/mo) and
+                Business plans.
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <Link
+                href="/pricing"
+                className="inline-flex w-fit shrink-0 items-center gap-1.5 rounded-lg bg-action-green px-3.5 py-1.5 text-xs font-semibold text-white transition-opacity hover:opacity-95"
+              >
+                <span>Upgrade to Pro</span>
+                <ArrowRight className="h-3.5 w-3.5" />
+              </Link>
+              <button
+                type="button"
+                onClick={() => setBulkPrintUpgradePrompt(false)}
+                aria-label="Dismiss upgrade prompt"
+                className="rounded p-1 text-ink-muted transition-colors hover:bg-canvas-muted hover:text-ink"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          </div>
+        ) : null}
 
         {qrCodes.length === 0 ? (
           <div className="space-y-6">

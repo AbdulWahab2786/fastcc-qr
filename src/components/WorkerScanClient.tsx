@@ -300,6 +300,32 @@ function getSafeExternalUrl(raw: string | null | undefined): string | null {
   return null;
 }
 
+function splitNoteSegments(notes: string): string[] {
+  return notes
+    .split(",")
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+}
+
+function hasIssueChipInNotes(notes: string, chip: string): boolean {
+  const target = chip.trim().toLowerCase();
+  return splitNoteSegments(notes).some(
+    (segment) => segment.toLowerCase() === target,
+  );
+}
+
+function toggleIssueChipInNotes(notes: string, chip: string): string {
+  const target = chip.trim().toLowerCase();
+  const segments = splitNoteSegments(notes);
+  const exists = segments.some((segment) => segment.toLowerCase() === target);
+  if (exists) {
+    return segments
+      .filter((segment) => segment.toLowerCase() !== target)
+      .join(", ");
+  }
+  return [...segments, chip.trim()].join(", ");
+}
+
 async function uploadInspectionPhoto(
   supabase: ReturnType<typeof createClient>,
   shortCode: string,
@@ -407,6 +433,7 @@ export function WorkerScanClient({
   );
   const [workerName, setWorkerName] = useState("");
   const [notes, setNotes] = useState("");
+  const [isNotesOpen, setIsNotesOpen] = useState(false);
   const [equipmentStatus, setEquipmentStatus] = useState<EquipmentStatus>("ok");
   const [reportedStatus, setReportedStatus] = useState<EquipmentStatus | null>(
     null,
@@ -774,6 +801,7 @@ export function WorkerScanClient({
     setFieldPhotoNames({});
     setEquipmentStatus("ok");
     setNotes("");
+    setIsNotesOpen(false);
     setProofPhotoName(null);
     setProofPhotoFile(null);
     setProofPhotoPreview(null);
@@ -1481,10 +1509,46 @@ export function WorkerScanClient({
                     >
                       {t.notesObservations}
                     </label>
+                    {equipmentStatus === "maintenance" ||
+                    equipmentStatus === "faulty" ||
+                    isNotesOpen ? (
+                      <div
+                        role="group"
+                        aria-label="Quick-select issue chips"
+                        className="mt-2 flex flex-wrap gap-1.5"
+                      >
+                        {t.quickIssueChips.map((chip) => {
+                          const selected = hasIssueChipInNotes(notes, chip);
+                          return (
+                            <button
+                              key={chip}
+                              type="button"
+                              aria-pressed={selected}
+                              onClick={() =>
+                                setNotes((prev) =>
+                                  toggleIssueChipInNotes(prev, chip),
+                                )
+                              }
+                              className={`inline-flex min-h-8 items-center gap-1 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+                                selected
+                                  ? "border-ink bg-ink text-white"
+                                  : "border-border bg-canvas text-ink hover:bg-canvas-muted"
+                              }`}
+                            >
+                              {selected ? (
+                                <Check className="h-3 w-3 shrink-0" />
+                              ) : null}
+                              <span>{chip}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ) : null}
                     <input
                       id="worker-notes"
                       type="text"
                       value={notes}
+                      onFocus={() => setIsNotesOpen(true)}
                       onChange={(e) => setNotes(e.target.value)}
                       placeholder={t.notesPlaceholder}
                       className="mt-1.5 min-h-12 w-full rounded-lg border border-border bg-canvas px-3.5 text-sm text-ink placeholder:text-ink-muted focus:border-ink focus:outline-none"
