@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -20,6 +20,7 @@ import {
   Sparkles,
   Trash2,
 } from "lucide-react";
+import { BulkPrintModal } from "@/components/BulkPrintModal";
 import {
   FREE_QR_LIMIT,
   getAiSopLimit,
@@ -158,6 +159,9 @@ export function DashboardClient({
   const [statusFilter, setStatusFilter] = useState<"all" | EquipmentStatus>(
     "all",
   );
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
+  const [isBulkPrintOpen, setIsBulkPrintOpen] = useState(false);
+  const selectAllCheckboxRef = useRef<HTMLInputElement>(null);
 
   const isPaid = isPaidPlan(plan);
   const planSpec = PLAN_SPECS[plan];
@@ -203,6 +207,61 @@ export function DashboardClient({
     return qrCodes.filter((qr) => (qr.current_status ?? "ok") === statusFilter);
   }, [qrCodes, statusFilter]);
 
+  const visibleQrIds = useMemo(
+    () => filteredQrCodes.map((qr) => qr.id),
+    [filteredQrCodes],
+  );
+
+  const allVisibleSelected =
+    visibleQrIds.length > 0 &&
+    visibleQrIds.every((id) => selectedIds.has(id));
+
+  const someVisibleSelected =
+    visibleQrIds.some((id) => selectedIds.has(id)) && !allVisibleSelected;
+
+  useEffect(() => {
+    if (selectAllCheckboxRef.current) {
+      selectAllCheckboxRef.current.indeterminate = someVisibleSelected;
+    }
+  }, [someVisibleSelected]);
+
+  const selectedQrs = useMemo(
+    () => qrCodes.filter((qr) => selectedIds.has(qr.id)),
+    [qrCodes, selectedIds],
+  );
+
+  function handleToggleSelectAll() {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (allVisibleSelected) {
+        for (const id of visibleQrIds) {
+          next.delete(id);
+        }
+      } else {
+        for (const id of visibleQrIds) {
+          next.add(id);
+        }
+      }
+      return next;
+    });
+  }
+
+  function handleToggleSelectOne(id: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  }
+
+  function handleClearSelection() {
+    setSelectedIds(new Set());
+  }
+
   async function handleCopyLink(shortCode: string) {
     const url = getQrScanUrl(shortCode);
     try {
@@ -234,6 +293,12 @@ export function DashboardClient({
 
       setQrCodes((prev) => prev.filter((item) => item.id !== qr.id));
       setLogs((prev) => prev.filter((log) => log.qr_code_id !== qr.id));
+      setSelectedIds((prev) => {
+        if (!prev.has(qr.id)) return prev;
+        const next = new Set(prev);
+        next.delete(qr.id);
+        return next;
+      });
       router.refresh();
     } catch {
       setErrorBanner(`Unexpected error deleting "${qr.title}".`);
@@ -290,7 +355,11 @@ export function DashboardClient({
   }
 
   return (
-    <main className="mx-auto max-w-6xl px-4 py-8 sm:px-6 sm:py-10">
+    <main
+      className={`mx-auto max-w-6xl px-4 py-8 sm:px-6 sm:py-10 ${
+        selectedQrs.length > 0 ? "pb-24 sm:pb-24" : ""
+      }`}
+    >
       {/* Header */}
       <div className="mb-6 flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
         <div>
@@ -532,6 +601,16 @@ export function DashboardClient({
               <table className="w-full border-collapse text-left text-sm">
                 <thead>
                   <tr className="border-b border-border bg-canvas-muted/70 text-xs font-medium uppercase tracking-wider text-ink-muted">
+                    <th className="w-10 px-4 py-3">
+                      <input
+                        ref={selectAllCheckboxRef}
+                        type="checkbox"
+                        checked={allVisibleSelected}
+                        onChange={handleToggleSelectAll}
+                        aria-label="Select all visible QR codes"
+                        className="h-4 w-4 cursor-pointer rounded border-border accent-action-green"
+                      />
+                    </th>
                     <th className="px-4 py-3">Title</th>
                     <th className="px-4 py-3">Status</th>
                     <th className="px-4 py-3">Type</th>
@@ -545,11 +624,23 @@ export function DashboardClient({
                   {filteredQrCodes.map((qr) => {
                     const isCopied = copiedCode === qr.short_code;
                     const isDeleting = deletingId === qr.id;
+                    const isSelected = selectedIds.has(qr.id);
                     return (
                       <tr
                         key={qr.id}
-                        className="transition-colors hover:bg-canvas/60"
+                        className={`transition-colors hover:bg-canvas/60 ${
+                          isSelected ? "bg-action-green/[0.04]" : ""
+                        }`}
                       >
+                        <td className="w-10 px-4 py-3.5">
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => handleToggleSelectOne(qr.id)}
+                            aria-label={`Select ${qr.title}`}
+                            className="h-4 w-4 cursor-pointer rounded border-border accent-action-green"
+                          />
+                        </td>
                         <td className="px-4 py-3.5">
                           <div className="font-medium text-ink">{qr.title}</div>
                           {qr.description ? (
@@ -779,6 +870,45 @@ export function DashboardClient({
           </div>
         )}
       </section>
+
+      {selectedQrs.length > 0 ? (
+        <div
+          role="region"
+          aria-label="Bulk QR actions"
+          className="fixed inset-x-0 bottom-4 z-40 mx-auto max-w-2xl px-4"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-surface px-4 py-3 shadow-lg">
+            <span className="font-mono text-xs font-semibold text-ink">
+              {selectedQrs.length} {selectedQrs.length === 1 ? "QR" : "QRs"}{" "}
+              selected
+            </span>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handleClearSelection}
+                className="rounded-lg border border-border bg-surface px-3 py-1.5 text-xs font-medium text-ink-muted transition-colors hover:bg-canvas-muted hover:text-ink"
+              >
+                Clear
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsBulkPrintOpen(true)}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-action-green px-4 py-1.5 text-xs font-semibold text-white transition-opacity hover:opacity-95"
+              >
+                <Printer className="h-3.5 w-3.5" />
+                <span>Print A4 Sticker Sheet</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      <BulkPrintModal
+        isOpen={isBulkPrintOpen}
+        onClose={() => setIsBulkPrintOpen(false)}
+        selectedQrs={selectedQrs}
+        plan={plan}
+      />
     </main>
   );
 }
