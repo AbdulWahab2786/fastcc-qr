@@ -2,7 +2,6 @@
 
 import { useEffect, useState, type DragEvent, type ChangeEvent } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import {
   Video,
   Camera,
@@ -17,12 +16,24 @@ import {
   ArrowRight,
   Loader2,
   Lock,
-  Package,
-  Wrench,
-  Tag,
-  Users,
+  Utensils,
+  Zap,
+  Flame,
+  Truck,
+  MessageCircle,
+  Plus,
+  X,
+  ClipboardList,
 } from "lucide-react";
 import { QrCodePreview } from "@/components/QrCodePreview";
+import {
+  buildSopConfigJson,
+  formatTemplateStepsText,
+  getIndustryTemplateById,
+  INDUSTRY_TEMPLATES,
+  parseSopStepsFromText,
+  type IndustryTemplate,
+} from "@/lib/industry-templates";
 import { createClient } from "@/lib/supabase/client";
 import { hasSupabaseEnv } from "@/lib/supabase/env";
 import {
@@ -30,11 +41,13 @@ import {
   getQrScanUrl,
   saveLocalQrRecord,
   saveLocalSopSteps,
-  TEMPLATE_PRESETS,
-  type TemplatePreset,
 } from "@/lib/qr-utils";
 import { downloadQrPng, downloadQrSvg } from "@/lib/qr-export";
-import type { PaperFormApiResponse, VideoSopApiResponse } from "@/types/ai";
+import type {
+  PaperFormApiResponse,
+  VideoSopApiResponse,
+  VideoSopChecklistItem,
+} from "@/types/ai";
 import type { Json } from "@/types/database";
 
 type WorkbenchTab = "video" | "paper" | "url" | "text";
@@ -42,11 +55,11 @@ type WorkbenchTab = "video" | "paper" | "url" | "text";
 const AI_LANGUAGES = ["English", "Hindi", "Hinglish", "Telugu", "Tamil"] as const;
 type AiLanguage = (typeof AI_LANGUAGES)[number];
 
-const TEMPLATE_ICONS: Record<string, typeof Package> = {
-  "d2c-packing-sop": Package,
-  "machine-maintenance-log": Wrench,
-  "fixed-asset-tag": Tag,
-  "shift-attendance": Users,
+const INDUSTRY_TEMPLATE_ICONS: Record<string, typeof Utensils> = {
+  "fssai-kitchen-cleaning": Utensils,
+  "dg-set-daily-check": Zap,
+  "fire-extinguisher-audit": Flame,
+  "warehouse-forklift-check": Truck,
 };
 
 interface ActivePreview {
@@ -57,17 +70,42 @@ interface ActivePreview {
   isDemo: boolean;
 }
 
-export function HomeWorkbench() {
-  const router = useRouter();
-  const [activeTab, setActiveTab] = useState<WorkbenchTab>("url");
+interface HomeWorkbenchProps {
+  initialTemplateId?: string;
+}
 
-  // Standard URL & File/Text inputs
+export function HomeWorkbench({ initialTemplateId }: HomeWorkbenchProps) {
+  const initialTemplate = getIndustryTemplateById(initialTemplateId);
+
+  const [activeTab, setActiveTab] = useState<WorkbenchTab>(() =>
+    initialTemplate ? "text" : "url",
+  );
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(
+    () => initialTemplate?.id ?? null,
+  );
+
+  // Standard URL & SOP/Checklist inputs
   const [urlTitle, setUrlTitle] = useState("Line B — Safety & Startup Guide");
   const [urlTarget, setUrlTarget] = useState("https://fastcc.app/sop/line-b");
-  const [textTitle, setTextTitle] = useState("Compressor Daily Check");
-  const [textBody, setTextBody] = useState(
-    "1. Check oil sight glass.\n2. Drain moisture trap.\n3. Verify 8 bar cutout.",
+  const [textTitle, setTextTitle] = useState(() =>
+    initialTemplate ? initialTemplate.title : "Compressor Daily Check",
   );
+  const [sopCategory, setSopCategory] = useState(() =>
+    initialTemplate ? initialTemplate.category : "Operations",
+  );
+  const [textBody, setTextBody] = useState(() =>
+    initialTemplate
+      ? formatTemplateStepsText(initialTemplate.steps)
+      : "1. Check oil sight glass.\n2. Drain moisture trap.\n3. Verify 8 bar cutout.",
+  );
+  const [checklistItems, setChecklistItems] = useState<VideoSopChecklistItem[]>(
+    () =>
+      initialTemplate
+        ? initialTemplate.checklist.map((item) => ({ ...item }))
+        : [],
+  );
+  const [newChecklistLabel, setNewChecklistLabel] = useState("");
+  const [managerWhatsapp, setManagerWhatsapp] = useState("");
 
   // AI Video-to-SOP & AI Paper-to-Form inputs
   const [aiLanguage, setAiLanguage] = useState<AiLanguage>("Hinglish");
@@ -101,9 +139,6 @@ export function HomeWorkbench() {
 
   // Generation & Preview state
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [launchingTemplateId, setLaunchingTemplateId] = useState<string | null>(
-    null,
-  );
   const [bannerNotice, setBannerNotice] = useState<string | null>(null);
   const [preview, setPreview] = useState<ActivePreview>({
     shortCode: "demo",
@@ -114,6 +149,47 @@ export function HomeWorkbench() {
   });
 
   const scanUrl = getQrScanUrl(preview.shortCode);
+  const selectedTemplate = getIndustryTemplateById(selectedTemplateId);
+
+  function applyIndustryTemplate(
+    template: IndustryTemplate,
+    options?: { scrollToWorkbench?: boolean },
+  ) {
+    setSelectedTemplateId(template.id);
+    setActiveTab("text");
+    setTextTitle(template.title);
+    setSopCategory(template.category);
+    setTextBody(formatTemplateStepsText(template.steps));
+    setChecklistItems(template.checklist.map((item) => ({ ...item })));
+    setAiStatusMessage(null);
+    setAiErrorMessage(null);
+    setAiUpgradeMessage(null);
+    setAiAuthRequired(false);
+    setBannerNotice(null);
+
+    if (options?.scrollToWorkbench && typeof window !== "undefined") {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+  }
+
+  function handleAddChecklistItem() {
+    const trimmed = newChecklistLabel.trim();
+    if (!trimmed) return;
+    setChecklistItems((prev) => [...prev, { label: trimmed, required: true }]);
+    setNewChecklistLabel("");
+  }
+
+  function handleRemoveChecklistItem(index: number) {
+    setChecklistItems((prev) => prev.filter((_, idx) => idx !== index));
+  }
+
+  function handleToggleChecklistRequired(index: number) {
+    setChecklistItems((prev) =>
+      prev.map((item, idx) =>
+        idx === index ? { ...item, required: !item.required } : item,
+      ),
+    );
+  }
 
   async function handleGeneratePermanentQr() {
     setIsSubmitting(true);
@@ -121,15 +197,38 @@ export function HomeWorkbench() {
     setQrUpgradeMessage(null);
 
     const isUrlTab = activeTab === "url";
+    const parsedSteps = isUrlTab
+      ? []
+      : parseSopStepsFromText(textBody, selectedTemplate?.steps ?? []);
+    const isSopMode =
+      !isUrlTab &&
+      (checklistItems.length > 0 ||
+        parsedSteps.length > 1 ||
+        Boolean(selectedTemplate) ||
+        Boolean(managerWhatsapp.trim()));
+
     const title = isUrlTab ? urlTitle : textTitle;
-    const description = isUrlTab ? urlTarget : textBody;
-    const category = isUrlTab ? "url" : "text";
+    const description = isUrlTab
+      ? urlTarget
+      : selectedTemplate?.description ?? textBody;
+    const category = isUrlTab ? "url" : isSopMode ? sopCategory : "text";
+    const trimmedWhatsapp = managerWhatsapp.trim();
+
+    const configJson = isUrlTab
+      ? undefined
+      : buildSopConfigJson({
+          summary: selectedTemplate?.description,
+          checklist: checklistItems,
+          managerWhatsapp: trimmedWhatsapp,
+        });
 
     const result = await createGuestQrCode({
       title,
       description,
       category,
-      type: isUrlTab ? "url" : "standard",
+      type: isUrlTab ? "url" : isSopMode ? "sop" : "standard",
+      configJson,
+      steps: isSopMode ? parsedSteps : undefined,
     });
 
     if (result.blockedByPlanLimit || !result.record) {
@@ -144,9 +243,11 @@ export function HomeWorkbench() {
     setPreview({
       shortCode: result.record.short_code,
       title: result.record.title,
-      subtitle: result.record.description
-        ? result.record.description.slice(0, 64)
-        : "Scan for instructions",
+      subtitle: isSopMode
+        ? `${parsedSteps.length} SOP steps • ${checklistItems.length} checks`
+        : result.record.description
+          ? result.record.description.slice(0, 64)
+          : "Scan for instructions",
       isLocalFallback: result.isLocalFallback,
       isDemo: false,
     });
@@ -194,7 +295,9 @@ export function HomeWorkbench() {
     }
 
     if (mode === "video" && selectedFile.size > 25 * 1024 * 1024) {
-      setAiErrorMessage("Video file exceeds the 25MB limit. Trim to ~60s and retry.");
+      setAiErrorMessage(
+        "Video file exceeds the 25MB limit. Trim to ~60s and retry.",
+      );
       return;
     }
 
@@ -204,6 +307,9 @@ export function HomeWorkbench() {
     const formData = new FormData();
     formData.append(fieldName, selectedFile);
     formData.append("languages", JSON.stringify([aiLanguage]));
+    if (managerWhatsapp.trim()) {
+      formData.append("manager_whatsapp", managerWhatsapp.trim());
+    }
 
     setIsAiProcessing(true);
     setAiStatusMessage(
@@ -251,6 +357,8 @@ export function HomeWorkbench() {
       }
 
       const now = new Date().toISOString();
+      const trimmedWhatsapp = managerWhatsapp.trim();
+
       if (mode === "video") {
         const videoResult = body as VideoSopApiResponse;
         saveLocalQrRecord({
@@ -265,6 +373,7 @@ export function HomeWorkbench() {
             summary: videoResult.summary,
             checklist: videoResult.checklist,
             languages: [aiLanguage],
+            ...(trimmedWhatsapp ? { manager_whatsapp: trimmedWhatsapp } : {}),
           } as unknown as Json,
           show_watermark: Boolean(videoResult.show_watermark ?? true),
           scan_count: 0,
@@ -316,6 +425,7 @@ export function HomeWorkbench() {
           config_json: {
             fields: paperResult.fields,
             languages: [aiLanguage],
+            ...(trimmedWhatsapp ? { manager_whatsapp: trimmedWhatsapp } : {}),
           } as unknown as Json,
           show_watermark: Boolean(paperResult.show_watermark ?? true),
           scan_count: 0,
@@ -379,30 +489,11 @@ export function HomeWorkbench() {
     }
   }
 
-  async function handleLaunchTemplate(preset: TemplatePreset) {
-    setQrUpgradeMessage(null);
-    setLaunchingTemplateId(preset.id);
-    const result = await createGuestQrCode({
-      title: preset.title,
-      description: preset.description,
-      category: preset.category,
-    });
-    setLaunchingTemplateId(null);
-    if (result.blockedByPlanLimit || !result.record) {
-      setQrUpgradeMessage(
-        result.notice ||
-          "Free plan limit reached (10/10 QR codes). Upgrade to Pro for unlimited QR codes.",
-      );
-      return;
-    }
-    router.push(`/studio/${result.record.short_code}`);
-  }
-
   const tabs: { id: WorkbenchTab; label: string; icon: typeof Video }[] = [
     { id: "video", label: "AI Video-to-SOP", icon: Video },
     { id: "paper", label: "AI Paper-to-Form", icon: Camera },
     { id: "url", label: "Standard URL", icon: Link2 },
-    { id: "text", label: "File / Text", icon: FileText },
+    { id: "text", label: "SOP / Checklist", icon: FileText },
   ];
 
   return (
@@ -436,7 +527,7 @@ export function HomeWorkbench() {
       ) : null}
 
       {/* Hero 2-Column CaoLiao-Style Workbench */}
-      <section aria-label="Instant QR Workbench">
+      <section id="workbench-top" aria-label="Instant QR Workbench">
         <div className="mb-5 flex flex-col justify-between gap-2 sm:flex-row sm:items-end">
           <div>
             <h1 className="text-2xl font-semibold tracking-tight text-ink sm:text-3xl">
@@ -453,8 +544,62 @@ export function HomeWorkbench() {
         </div>
 
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
-          {/* Left Column: Tabbed Input */}
+          {/* Left Column: Industry Template Picker + Tabbed Input */}
           <div className="rounded-xl border border-border bg-surface lg:col-span-7">
+            {/* Start from Industry Template Picker */}
+            <div className="border-b border-border bg-canvas/70 px-4 py-3.5 sm:px-6">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-ink">
+                  <ClipboardList className="h-3.5 w-3.5 text-action-green" />
+                  Start from Industry Template
+                </span>
+                <span className="font-mono text-[11px] text-ink-muted">
+                  1-click SOP + 5 checks
+                </span>
+              </div>
+              <div className="mt-2.5 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                {INDUSTRY_TEMPLATES.map((template) => {
+                  const Icon =
+                    INDUSTRY_TEMPLATE_ICONS[template.id] ?? ClipboardList;
+                  const isSelected =
+                    selectedTemplateId === template.id && activeTab === "text";
+                  return (
+                    <button
+                      key={template.id}
+                      type="button"
+                      onClick={() => applyIndustryTemplate(template)}
+                      className={`flex items-center justify-between gap-2 rounded-lg border px-3 py-2 text-left transition-colors ${
+                        isSelected
+                          ? "border-action-green bg-action-green/10 text-ink"
+                          : "border-border bg-surface text-ink hover:border-utility-blue"
+                      }`}
+                    >
+                      <div className="flex min-w-0 items-center gap-2">
+                        <span
+                          className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md border ${
+                            isSelected
+                              ? "border-action-green/30 bg-action-green text-white"
+                              : "border-border bg-canvas-muted text-ink"
+                          }`}
+                        >
+                          <Icon className="h-3.5 w-3.5" />
+                        </span>
+                        <div className="min-w-0">
+                          <p className="truncate text-xs font-semibold text-ink">
+                            {template.title}
+                          </p>
+                          <p className="truncate text-[11px] text-ink-muted">
+                            {template.category}
+                          </p>
+                        </div>
+                      </div>
+                      <ArrowRight className="h-3.5 w-3.5 shrink-0 text-ink-muted" />
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
             {/* Tab Bar */}
             <div
               role="tablist"
@@ -544,6 +689,23 @@ export function HomeWorkbench() {
 
               {activeTab === "text" ? (
                 <div className="space-y-4">
+                  {selectedTemplate ? (
+                    <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-action-green/30 bg-action-green/5 px-3 py-2 text-xs">
+                      <span className="font-medium text-ink">
+                        Loaded:{" "}
+                        <span className="font-semibold">
+                          {selectedTemplate.title}
+                        </span>{" "}
+                        <span className="text-ink-muted">
+                          ({selectedTemplate.category})
+                        </span>
+                      </span>
+                      <span className="font-mono text-[11px] font-semibold text-action-green">
+                        {checklistItems.length} checklist items ready
+                      </span>
+                    </div>
+                  ) : null}
+
                   <div>
                     <label
                       htmlFor="text-title"
@@ -560,22 +722,122 @@ export function HomeWorkbench() {
                       className="mt-1.5 w-full rounded-lg border border-border bg-surface px-3.5 py-2.5 text-sm text-ink outline-none focus:border-utility-blue"
                     />
                   </div>
+
                   <div>
                     <label
                       htmlFor="text-body"
                       className="block text-xs font-semibold uppercase tracking-wide text-ink-muted"
                     >
-                      Instructions / Text Content
+                      SOP Instructions (1 step per line)
                     </label>
                     <textarea
                       id="text-body"
                       rows={5}
                       value={textBody}
                       onChange={(e) => setTextBody(e.target.value)}
-                      placeholder="Enter step-by-step instructions or asset notes..."
+                      placeholder="1. Step title: Step instruction..."
                       className="mt-1.5 w-full rounded-lg border border-border bg-surface px-3.5 py-2.5 text-sm text-ink outline-none focus:border-utility-blue"
                     />
                   </div>
+
+                  {/* Checklist Items */}
+                  <div className="rounded-lg border border-border bg-canvas p-3.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-semibold uppercase tracking-wide text-ink-muted">
+                        Worker Checklist Items ({checklistItems.length})
+                      </span>
+                      <span className="text-[11px] text-ink-muted">
+                        Tap badge to toggle required
+                      </span>
+                    </div>
+
+                    {checklistItems.length > 0 ? (
+                      <ul className="mt-2.5 space-y-1.5">
+                        {checklistItems.map((item, idx) => (
+                          <li
+                            key={`${item.label}-${idx}`}
+                            className="flex items-center justify-between gap-2 rounded-md border border-border bg-surface px-2.5 py-1.5 text-xs"
+                          >
+                            <span className="truncate font-medium text-ink">
+                              {idx + 1}. {item.label}
+                            </span>
+                            <div className="flex shrink-0 items-center gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  handleToggleChecklistRequired(idx)
+                                }
+                                className={`rounded px-1.5 py-0.5 font-mono text-[10px] font-semibold uppercase transition-colors ${
+                                  item.required
+                                    ? "bg-action-green/10 text-action-green"
+                                    : "bg-canvas-muted text-ink-muted"
+                                }`}
+                              >
+                                {item.required ? "Required" : "Optional"}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveChecklistItem(idx)}
+                                aria-label={`Remove ${item.label}`}
+                                className="rounded p-0.5 text-ink-muted hover:bg-canvas-muted hover:text-alert-red"
+                              >
+                                <X className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : null}
+
+                    <div className="mt-2.5 flex gap-2">
+                      <input
+                        type="text"
+                        value={newChecklistLabel}
+                        onChange={(e) => setNewChecklistLabel(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            handleAddChecklistItem();
+                          }
+                        }}
+                        placeholder="Add a checklist item (e.g., Area swept & dry)"
+                        className="w-full rounded-md border border-border bg-surface px-3 py-1.5 text-xs text-ink outline-none focus:border-utility-blue"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleAddChecklistItem}
+                        className="inline-flex shrink-0 items-center gap-1 rounded-md border border-border bg-surface px-2.5 py-1.5 text-xs font-semibold text-ink hover:bg-canvas-muted"
+                      >
+                        <Plus className="h-3.5 w-3.5" />
+                        Add
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Optional Manager WhatsApp Alert Number */}
+                  <div>
+                    <label
+                      htmlFor="text-manager-whatsapp"
+                      className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-ink-muted"
+                    >
+                      <MessageCircle className="h-3.5 w-3.5 text-action-green" />
+                      Manager WhatsApp Number (for Faulty Alerts)
+                    </label>
+                    <input
+                      id="text-manager-whatsapp"
+                      type="tel"
+                      value={managerWhatsapp}
+                      onChange={(e) => setManagerWhatsapp(e.target.value)}
+                      placeholder="+91 9876543210 (Optional)"
+                      className="mt-1.5 w-full rounded-lg border border-border bg-surface px-3.5 py-2.5 font-mono text-sm text-ink outline-none focus:border-utility-blue"
+                    />
+                    <p className="mt-1 text-[11px] text-ink-muted">
+                      Workers reporting Faulty or Needs Maintenance get a 1-tap
+                      WhatsApp alert pre-filled with machine, notes &amp; photo
+                      proof.
+                    </p>
+                  </div>
+
                   <div className="pt-1">
                     <button
                       type="button"
@@ -677,6 +939,24 @@ export function HomeWorkbench() {
                       </span>
                     </div>
                   ) : null}
+
+                  <div>
+                    <label
+                      htmlFor="ai-manager-whatsapp"
+                      className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-ink-muted"
+                    >
+                      <MessageCircle className="h-3.5 w-3.5 text-action-green" />
+                      Manager WhatsApp Number (for Faulty Alerts)
+                    </label>
+                    <input
+                      id="ai-manager-whatsapp"
+                      type="tel"
+                      value={managerWhatsapp}
+                      onChange={(e) => setManagerWhatsapp(e.target.value)}
+                      placeholder="+91 9876543210 (Optional)"
+                      className="mt-1.5 w-full rounded-lg border border-border bg-surface px-3.5 py-2 font-mono text-sm text-ink outline-none focus:border-utility-blue"
+                    />
+                  </div>
 
                   {aiAuthRequired ? (
                     <div className="flex flex-col gap-3 rounded-lg border border-utility-blue/30 bg-utility-blue/5 p-4 sm:flex-row sm:items-center sm:justify-between">
@@ -781,7 +1061,10 @@ export function HomeWorkbench() {
                 <p className="mt-3 text-sm font-semibold text-ink">
                   {preview.title}
                 </p>
-                <p className="mt-0.5 font-mono text-xs text-ink-muted">
+                <p className="mt-0.5 text-xs text-ink-muted">
+                  {preview.subtitle}
+                </p>
+                <p className="mt-1 font-mono text-xs text-ink-muted">
                   /q/{preview.shortCode}
                 </p>
               </div>
@@ -818,35 +1101,47 @@ export function HomeWorkbench() {
                 Open Label Studio
                 <ExternalLink className="h-4 w-4" />
               </Link>
+
+              <Link
+                href={`/q/${preview.shortCode}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-lg border border-border bg-surface px-4 text-xs font-semibold text-ink transition-colors hover:bg-canvas-muted"
+              >
+                Test Worker Scan View
+                <ArrowRight className="h-3.5 w-3.5" />
+              </Link>
             </div>
           </div>
         </div>
       </section>
 
-      {/* 1-Click Template Gallery (Below the Fold) */}
+      {/* 1-Click Industry Template Gallery (Below the Fold) */}
       <section id="templates" className="mt-12 border-t border-border pt-10">
         <div className="mb-5 flex flex-col justify-between gap-2 sm:flex-row sm:items-end">
           <div>
             <h2 className="text-lg font-semibold text-ink sm:text-xl">
-              1-Click Operational Templates
+              1-Click Industry SOP Templates
             </h2>
             <p className="mt-1 text-sm text-ink-muted">
-              Launch a pre-configured QR label in Label Studio with one click.
+              Pre-built Indian B2B &amp; compliance checklists. Populate the
+              workbench in one click and generate a live QR in under 10 seconds.
             </p>
           </div>
         </div>
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          {TEMPLATE_PRESETS.map((preset) => {
-            const Icon = TEMPLATE_ICONS[preset.id] ?? Package;
-            const isLoading = launchingTemplateId === preset.id;
+          {INDUSTRY_TEMPLATES.map((template) => {
+            const Icon =
+              INDUSTRY_TEMPLATE_ICONS[template.id] ?? ClipboardList;
             return (
               <button
-                key={preset.id}
+                key={template.id}
                 type="button"
-                disabled={launchingTemplateId !== null}
-                onClick={() => handleLaunchTemplate(preset)}
-                className="group flex flex-col justify-between rounded-xl border border-border bg-surface p-5 text-left transition-colors hover:border-utility-blue disabled:opacity-60"
+                onClick={() =>
+                  applyIndustryTemplate(template, { scrollToWorkbench: true })
+                }
+                className="group flex flex-col justify-between rounded-xl border border-border bg-surface p-5 text-left transition-colors hover:border-action-green"
               >
                 <div>
                   <div className="flex items-center justify-between gap-2">
@@ -854,19 +1149,23 @@ export function HomeWorkbench() {
                       <Icon className="h-4 w-4" />
                     </div>
                     <span className="rounded border border-border bg-canvas px-2 py-0.5 font-mono text-[11px] text-ink-muted">
-                      {preset.badge}
+                      {template.category}
                     </span>
                   </div>
-                  <h3 className="mt-3.5 text-sm font-semibold text-ink group-hover:text-utility-blue">
-                    {preset.title}
+                  <h3 className="mt-3.5 text-sm font-semibold text-ink group-hover:text-action-green">
+                    {template.title}
                   </h3>
                   <p className="mt-1.5 text-xs leading-relaxed text-ink-muted">
-                    {preset.description}
+                    {template.description}
+                  </p>
+                  <p className="mt-2 font-mono text-[11px] text-ink-muted">
+                    {template.steps.length} SOP steps •{" "}
+                    {template.checklist.length} checks
                   </p>
                 </div>
 
-                <div className="mt-4 inline-flex items-center gap-1.5 text-xs font-semibold text-utility-blue">
-                  {isLoading ? "Creating Studio..." : "Use Template"}
+                <div className="mt-4 inline-flex items-center gap-1.5 text-xs font-semibold text-action-green">
+                  Load in Workbench
                   <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
                 </div>
               </button>

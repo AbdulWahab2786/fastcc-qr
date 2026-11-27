@@ -208,11 +208,20 @@ export function saveLocalInspectionLog(
   return saved;
 }
 
+export interface CreateGuestSopStepInput {
+  stepOrder: number;
+  title: string;
+  instruction: string;
+  isCritical?: boolean;
+}
+
 export interface CreateGuestQrInput {
   title: string;
   description: string;
   category: string;
   type?: string;
+  configJson?: Json;
+  steps?: CreateGuestSopStepInput[];
 }
 
 export interface CreateGuestQrResult {
@@ -220,6 +229,24 @@ export interface CreateGuestQrResult {
   isLocalFallback: boolean;
   blockedByPlanLimit?: boolean;
   notice?: string;
+}
+
+function toLocalSopSteps(
+  qrCodeId: string,
+  steps: CreateGuestSopStepInput[],
+  createdAt: string,
+): SopStepRow[] {
+  return steps.map((step) => ({
+    id: `${qrCodeId}-step-${step.stepOrder}`,
+    qr_code_id: qrCodeId,
+    step_order: step.stepOrder,
+    title: step.title,
+    instruction: step.instruction,
+    is_critical: Boolean(step.isCritical),
+    timestamp_sec: null,
+    translations_json: {},
+    created_at: createdAt,
+  }));
 }
 
 /**
@@ -237,6 +264,8 @@ export async function createGuestQrCode(
   const description = input.description.trim() || null;
   const category = input.category || "general";
   const type = input.type || "standard";
+  const configJson = input.configJson ?? {};
+  const steps = input.steps ?? [];
 
   const localFallbackRecord: QrCodeRow = {
     id:
@@ -249,7 +278,7 @@ export async function createGuestQrCode(
     description,
     category,
     type,
-    config_json: {},
+    config_json: configJson,
     show_watermark: true,
     scan_count: 0,
     last_scanned_at: null,
@@ -261,6 +290,12 @@ export async function createGuestQrCode(
 
   if (!hasSupabaseEnv()) {
     saveLocalQrRecord(localFallbackRecord);
+    if (steps.length > 0) {
+      saveLocalSopSteps(
+        [shortCode, localFallbackRecord.id],
+        toLocalSopSteps(localFallbackRecord.id, steps, now),
+      );
+    }
     return {
       record: localFallbackRecord,
       isLocalFallback: true,
@@ -321,6 +356,7 @@ export async function createGuestQrCode(
         description,
         category,
         type,
+        config_json: configJson,
         show_watermark: showWatermark,
       })
       .select()
@@ -339,6 +375,12 @@ export async function createGuestQrCode(
         };
       }
       saveLocalQrRecord(localFallbackRecord);
+      if (steps.length > 0) {
+        saveLocalSopSteps(
+          [shortCode, localFallbackRecord.id],
+          toLocalSopSteps(localFallbackRecord.id, steps, now),
+        );
+      }
       return {
         record: localFallbackRecord,
         isLocalFallback: true,
@@ -349,12 +391,43 @@ export async function createGuestQrCode(
     }
 
     saveLocalQrRecord(data);
+
+    if (steps.length > 0) {
+      const stepRows = steps.map((step) => ({
+        qr_code_id: data.id,
+        step_order: step.stepOrder,
+        title: step.title,
+        instruction: step.instruction,
+        is_critical: Boolean(step.isCritical),
+      }));
+
+      const { data: insertedSteps, error: stepsError } = await supabase
+        .from("sop_steps")
+        .insert(stepRows)
+        .select();
+
+      if (!stepsError && insertedSteps) {
+        saveLocalSopSteps([data.short_code, data.id], insertedSteps);
+      } else {
+        saveLocalSopSteps(
+          [data.short_code, data.id],
+          toLocalSopSteps(data.id, steps, now),
+        );
+      }
+    }
+
     return {
       record: data,
       isLocalFallback: false,
     };
   } catch {
     saveLocalQrRecord(localFallbackRecord);
+    if (steps.length > 0) {
+      saveLocalSopSteps(
+        [shortCode, localFallbackRecord.id],
+        toLocalSopSteps(localFallbackRecord.id, steps, now),
+      );
+    }
     return {
       record: localFallbackRecord,
       isLocalFallback: true,

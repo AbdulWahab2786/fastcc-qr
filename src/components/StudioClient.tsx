@@ -14,6 +14,7 @@ import {
   AlertCircle,
   LayoutTemplate,
   Lock,
+  MessageCircle,
 } from "lucide-react";
 import { QrCodePreview } from "@/components/QrCodePreview";
 import { isPaidPlan } from "@/lib/billing/constants";
@@ -26,9 +27,10 @@ import {
   getDemoQrRecord,
   getLocalQrRecord,
   getQrScanUrl,
+  saveLocalQrRecord,
 } from "@/lib/qr-utils";
 import { createClient } from "@/lib/supabase/client";
-import type { PlanTier } from "@/types/database";
+import type { Json, PlanTier } from "@/types/database";
 import type { QrCodeRow } from "@/types/qr";
 
 interface StudioClientProps {
@@ -66,6 +68,19 @@ const LAYOUT_PRESETS: {
 
 const subscribeNoop = () => () => {};
 
+function isConfigObject(
+  value: unknown,
+): value is Record<string, Json | undefined> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function extractManagerWhatsapp(config: Json): string {
+  if (!isConfigObject(config)) return "";
+  return typeof config.manager_whatsapp === "string"
+    ? config.manager_whatsapp
+    : "";
+}
+
 export function StudioClient({
   routeId,
   initialRecord,
@@ -82,6 +97,7 @@ export function StudioClient({
 
   const record = initialRecord ?? localRecord ?? getDemoQrRecord(routeId);
   const isLocalFallback = !initialRecord;
+  const isDemoFallback = !initialRecord && !localRecord;
   const safeShortCode = record.short_code || routeId || "demo";
   const isPaidUser = userPlan !== null && isPaidPlan(userPlan);
   const isOwner = Boolean(
@@ -90,6 +106,8 @@ export function StudioClient({
       currentUserId === record.user_id &&
       !isLocalFallback,
   );
+  const canPersistAlertSettings =
+    isOwner || (isLocalFallback && !isDemoFallback);
 
   const [preset, setPreset] = useState<StudioLayoutPreset>("equipment-plate");
   const [headerTitleOverride, setHeaderTitleOverride] = useState<string | null>(
@@ -99,6 +117,14 @@ export function StudioClient({
   const [subtitle, setSubtitle] = useState<string>(
     "Scan for Hindi/English Steps",
   );
+  const initialManagerWhatsapp = extractManagerWhatsapp(record.config_json);
+  const [managerWhatsappOverride, setManagerWhatsappOverride] = useState<
+    string | null
+  >(null);
+  const managerWhatsapp = managerWhatsappOverride ?? initialManagerWhatsapp;
+  const [savingAlertSettings, setSavingAlertSettings] = useState(false);
+  const [alertSavedNotice, setAlertSavedNotice] = useState(false);
+  const [alertSaveError, setAlertSaveError] = useState<string | null>(null);
   const [logoMode, setLogoMode] = useState<LogoMode>("fastcc");
   const [customLogoDataUrl, setCustomLogoDataUrl] = useState<string | null>(
     null,
@@ -124,6 +150,60 @@ export function StudioClient({
         : null;
 
   const scanUrl = getQrScanUrl(safeShortCode);
+
+  async function handleSaveAlertSettings() {
+    if (!canPersistAlertSettings) return;
+    setSavingAlertSettings(true);
+    setAlertSavedNotice(false);
+    setAlertSaveError(null);
+
+    const baseConfig: Record<string, Json | undefined> = isConfigObject(
+      record.config_json,
+    )
+      ? { ...record.config_json }
+      : {};
+
+    const trimmedWhatsapp = managerWhatsapp.trim();
+    if (trimmedWhatsapp) {
+      baseConfig.manager_whatsapp = trimmedWhatsapp;
+    } else {
+      delete baseConfig.manager_whatsapp;
+    }
+
+    const nextConfigJson = baseConfig as Json;
+    const nextTitle = headerTitle.trim() || record.title;
+
+    try {
+      if (isOwner && supabaseConfigured) {
+        const supabase = createClient();
+        const { error } = await supabase
+          .from("qr_codes")
+          .update({
+            title: nextTitle,
+            config_json: nextConfigJson,
+          })
+          .eq("id", record.id);
+
+        if (error) {
+          setAlertSaveError(error.message);
+          return;
+        }
+      }
+
+      saveLocalQrRecord({
+        ...record,
+        title: nextTitle,
+        config_json: nextConfigJson,
+        updated_at: new Date().toISOString(),
+      });
+      setAlertSavedNotice(true);
+      setTimeout(() => setAlertSavedNotice(false), 2500);
+    } catch {
+      setAlertSaveError("Could not save alert settings. Please try again.");
+    } finally {
+      setSavingAlertSettings(false);
+    }
+  }
 
   async function handleToggleWatermark() {
     if (!isPaidUser) {
@@ -390,6 +470,67 @@ export function StudioClient({
                 {record.short_code}
               </span>
             </div>
+          </section>
+
+          {/* Manager WhatsApp Faulty Alert Configuration */}
+          <section className="rounded-xl border border-border bg-surface p-5 space-y-3">
+            <div className="flex items-center gap-2">
+              <MessageCircle className="h-4 w-4 text-action-green" />
+              <h2 className="text-sm font-semibold text-ink">
+                Faulty Alert Settings (WhatsApp)
+              </h2>
+            </div>
+
+            <div>
+              <label
+                htmlFor="studio-manager-whatsapp"
+                className="block text-xs font-semibold uppercase tracking-wide text-ink-muted"
+              >
+                Manager WhatsApp Number (for Faulty Alerts)
+              </label>
+              <input
+                id="studio-manager-whatsapp"
+                type="tel"
+                value={managerWhatsapp}
+                onChange={(e) => {
+                  setManagerWhatsappOverride(e.target.value);
+                  setAlertSavedNotice(false);
+                  setAlertSaveError(null);
+                }}
+                disabled={!canPersistAlertSettings}
+                placeholder="+91 9876543210 (Optional)"
+                className="mt-1.5 w-full rounded-lg border border-border bg-surface px-3 py-2 font-mono text-sm text-ink outline-none focus:border-utility-blue disabled:cursor-not-allowed disabled:bg-canvas-muted"
+              />
+              <p className="mt-1 text-[11px] text-ink-muted">
+                {canPersistAlertSettings
+                  ? "Workers reporting Faulty or Needs Maintenance see a 1-tap WhatsApp alert button pre-addressed to this number."
+                  : "Sign in as the QR owner to configure the manager WhatsApp alert number."}
+              </p>
+            </div>
+
+            {alertSaveError ? (
+              <p className="text-xs text-alert-red">{alertSaveError}</p>
+            ) : null}
+
+            {canPersistAlertSettings ? (
+              <button
+                type="button"
+                disabled={savingAlertSettings}
+                onClick={handleSaveAlertSettings}
+                className="inline-flex min-h-10 items-center justify-center gap-1.5 rounded-lg border border-border bg-canvas px-3.5 text-xs font-semibold text-ink transition-colors hover:bg-canvas-muted disabled:opacity-60"
+              >
+                {alertSavedNotice ? (
+                  <>
+                    <Check className="h-3.5 w-3.5 text-action-green" />
+                    <span className="text-action-green">Saved Alert Number</span>
+                  </>
+                ) : savingAlertSettings ? (
+                  "Saving..."
+                ) : (
+                  "Save Alert Number"
+                )}
+              </button>
+            ) : null}
           </section>
 
           {/* Logo Overlay & Watermark */}

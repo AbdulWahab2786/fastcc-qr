@@ -249,6 +249,11 @@ export async function POST(request: Request) {
       : "Shop-Floor Video SOP";
 
   const languages = parseLanguagesField(formData.getAll("languages"));
+  const managerWhatsappEntry = formData.get("manager_whatsapp");
+  const managerWhatsapp =
+    typeof managerWhatsappEntry === "string" && managerWhatsappEntry.trim()
+      ? managerWhatsappEntry.trim()
+      : undefined;
 
   let ai: ReturnType<typeof getGeminiClient>;
   try {
@@ -324,6 +329,7 @@ export async function POST(request: Request) {
       summary: normalized.summary,
       checklist: normalized.checklist,
       languages,
+      ...(managerWhatsapp ? { manager_whatsapp: managerWhatsapp } : {}),
     } as unknown as Json;
 
     const persisted = await persistAiQrRecord({

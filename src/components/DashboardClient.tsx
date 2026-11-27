@@ -12,6 +12,8 @@ import {
   Copy,
   Download,
   ExternalLink,
+  Flame,
+  Loader2,
   Lock,
   Plus,
   Printer,
@@ -19,6 +21,9 @@ import {
   ScanLine,
   Sparkles,
   Trash2,
+  Truck,
+  Utensils,
+  Zap,
 } from "lucide-react";
 import { BulkPrintModal } from "@/components/BulkPrintModal";
 import {
@@ -27,8 +32,13 @@ import {
   isPaidPlan,
   PLAN_SPECS,
 } from "@/lib/billing/constants";
+import {
+  buildSopConfigJson,
+  INDUSTRY_TEMPLATES,
+  type IndustryTemplate,
+} from "@/lib/industry-templates";
 import { createClient } from "@/lib/supabase/client";
-import { getQrScanUrl } from "@/lib/qr-utils";
+import { createGuestQrCode, getQrScanUrl } from "@/lib/qr-utils";
 import type { EquipmentStatus, PlanTier } from "@/types/database";
 import type { InspectionLogRow, QrCodeRow } from "@/types/qr";
 
@@ -46,7 +56,15 @@ const TYPE_LABELS: Record<string, string> = {
   url: "url",
   video_sop: "video_sop",
   paper_form: "paper_form",
+  sop: "sop",
   standard: "standard",
+};
+
+const TEMPLATE_ICONS: Record<string, typeof Utensils> = {
+  "fssai-kitchen-cleaning": Utensils,
+  "dg-set-daily-check": Zap,
+  "fire-extinguisher-audit": Flame,
+  "warehouse-forklift-check": Truck,
 };
 
 function formatDate(iso: string): string {
@@ -161,6 +179,12 @@ export function DashboardClient({
   );
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   const [isBulkPrintOpen, setIsBulkPrintOpen] = useState(false);
+  const [launchingTemplateId, setLaunchingTemplateId] = useState<string | null>(
+    null,
+  );
+  const [templateUpgradePrompt, setTemplateUpgradePrompt] = useState<
+    string | null
+  >(null);
   const selectAllCheckboxRef = useRef<HTMLInputElement>(null);
 
   const isPaid = isPaidPlan(plan);
@@ -260,6 +284,42 @@ export function DashboardClient({
 
   function handleClearSelection() {
     setSelectedIds(new Set());
+  }
+
+  async function handleQuickLaunchTemplate(template: IndustryTemplate) {
+    setErrorBanner(null);
+    setTemplateUpgradePrompt(null);
+    setLaunchingTemplateId(template.id);
+
+    try {
+      const result = await createGuestQrCode({
+        title: template.title,
+        description: template.description,
+        category: template.category,
+        type: "sop",
+        configJson: buildSopConfigJson({
+          summary: template.description,
+          checklist: template.checklist,
+        }),
+        steps: template.steps,
+      });
+
+      if (result.blockedByPlanLimit || !result.record) {
+        setTemplateUpgradePrompt(
+          result.notice ||
+            "Free plan limit reached (10/10 QR codes). Upgrade to Pro for unlimited QR codes.",
+        );
+        return;
+      }
+
+      router.push(`/studio/${result.record.short_code}`);
+    } catch {
+      setErrorBanner(
+        `Unexpected error creating "${template.title}" template QR.`,
+      );
+    } finally {
+      setLaunchingTemplateId(null);
+    }
   }
 
   async function handleCopyLink(shortCode: string) {
@@ -435,6 +495,25 @@ export function DashboardClient({
         </div>
       ) : null}
 
+      {templateUpgradePrompt ? (
+        <div
+          role="alert"
+          className="mb-6 flex flex-col gap-3 rounded-lg border border-alert-red/30 bg-alert-red/5 px-4 py-3 text-xs text-ink sm:flex-row sm:items-center sm:justify-between"
+        >
+          <div className="flex items-center gap-2">
+            <Lock className="h-4 w-4 shrink-0 text-alert-red" />
+            <span>{templateUpgradePrompt}</span>
+          </div>
+          <Link
+            href="/pricing"
+            className="inline-flex w-fit shrink-0 items-center gap-1.5 rounded-lg bg-action-green px-3.5 py-1.5 text-xs font-semibold text-white transition-opacity hover:opacity-95"
+          >
+            Upgrade to Pro
+            <ArrowRight className="h-3.5 w-3.5" />
+          </Link>
+        </div>
+      ) : null}
+
       {/* Top KPI Cards */}
       <section
         aria-label="Key metrics"
@@ -564,22 +643,99 @@ export function DashboardClient({
         </div>
 
         {qrCodes.length === 0 ? (
-          <div className="rounded-xl border border-border bg-surface p-8 text-center">
-            <QrCode className="mx-auto h-8 w-8 text-ink-muted" />
-            <p className="mt-3 text-sm font-medium text-ink">
-              No QR codes saved to your account yet
-            </p>
-            <p className="mt-1 text-xs text-ink-muted">
-              Create a Standard URL, AI Video-to-SOP, or AI Paper-to-Form while
-              signed in to manage it here.
-            </p>
-            <Link
-              href="/"
-              className="mt-4 inline-flex items-center gap-1.5 rounded-lg bg-action-green px-4 py-2 text-xs font-medium text-white hover:opacity-95"
-            >
-              <Plus className="h-3.5 w-3.5" />
-              Create First QR Code
-            </Link>
+          <div className="space-y-6">
+            <div className="rounded-xl border border-border bg-surface p-8 text-center">
+              <QrCode className="mx-auto h-8 w-8 text-ink-muted" />
+              <p className="mt-3 text-sm font-medium text-ink">
+                No QR codes saved to your account yet
+              </p>
+              <p className="mt-1 text-xs text-ink-muted">
+                Launch an industry-ready SOP &amp; checklist in 1 click below,
+                or create a custom QR in the workbench.
+              </p>
+              <Link
+                href="/"
+                className="mt-4 inline-flex items-center gap-1.5 rounded-lg bg-action-green px-4 py-2 text-xs font-medium text-white hover:opacity-95"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                Open QR Workbench
+              </Link>
+            </div>
+
+            <div className="rounded-xl border border-border bg-surface p-5 sm:p-6">
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <h3 className="text-sm font-semibold text-ink">
+                    Quick-Launch Industry Templates
+                  </h3>
+                  <p className="text-xs text-ink-muted">
+                    Start with a pre-built Indian compliance SOP and 5-point
+                    worker checklist.
+                  </p>
+                </div>
+                <span className="rounded border border-border bg-canvas-muted px-2 py-0.5 font-mono text-[11px] text-ink-muted">
+                  1-Click Setup
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                {INDUSTRY_TEMPLATES.map((template) => {
+                  const Icon = TEMPLATE_ICONS[template.id] ?? QrCode;
+                  const isLaunching = launchingTemplateId === template.id;
+                  return (
+                    <div
+                      key={template.id}
+                      className="flex flex-col justify-between rounded-xl border border-border bg-canvas p-4"
+                    >
+                      <div>
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-surface text-ink">
+                            <Icon className="h-4 w-4" />
+                          </span>
+                          <span className="rounded border border-border bg-surface px-2 py-0.5 font-mono text-[10px] text-ink-muted">
+                            {template.category}
+                          </span>
+                        </div>
+                        <h4 className="mt-3 text-sm font-semibold text-ink">
+                          {template.title}
+                        </h4>
+                        <p className="mt-1 text-xs leading-relaxed text-ink-muted">
+                          {template.steps.length} SOP steps •{" "}
+                          {template.checklist.length} checks
+                        </p>
+                      </div>
+
+                      <div className="mt-4 flex flex-col gap-2">
+                        <button
+                          type="button"
+                          disabled={launchingTemplateId !== null}
+                          onClick={() => handleQuickLaunchTemplate(template)}
+                          className="inline-flex min-h-9 w-full items-center justify-center gap-1.5 rounded-lg bg-action-green px-3 text-xs font-semibold text-white transition-opacity hover:opacity-95 disabled:opacity-60"
+                        >
+                          {isLaunching ? (
+                            <>
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              Creating...
+                            </>
+                          ) : (
+                            <>
+                              Create Live QR
+                              <ArrowRight className="h-3.5 w-3.5" />
+                            </>
+                          )}
+                        </button>
+                        <Link
+                          href={`/?template=${template.id}`}
+                          className="inline-flex min-h-8 w-full items-center justify-center rounded-lg border border-border bg-surface px-3 text-xs font-medium text-ink-muted transition-colors hover:bg-canvas-muted hover:text-ink"
+                        >
+                          Customize in Workbench
+                        </Link>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
           </div>
         ) : filteredQrCodes.length === 0 ? (
           <div className="rounded-xl border border-border bg-surface p-8 text-center">
@@ -724,6 +880,68 @@ export function DashboardClient({
           </div>
         )}
       </section>
+
+      {qrCodes.length > 0 ? (
+        <section
+          aria-labelledby="quick-templates-heading"
+          className="mb-10 rounded-xl border border-border bg-surface p-4 sm:p-5"
+        >
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h2
+                id="quick-templates-heading"
+                className="text-sm font-semibold text-ink"
+              >
+                Quick-Launch Industry Templates
+              </h2>
+              <p className="text-xs text-ink-muted">
+                Spin up a ready-to-print SOP &amp; 5-point checklist QR in 1
+                click.
+              </p>
+            </div>
+            <Link
+              href="/#templates"
+              className="text-xs font-medium text-utility-blue hover:underline"
+            >
+              Customize in Workbench
+            </Link>
+          </div>
+          <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-4">
+            {INDUSTRY_TEMPLATES.map((template) => {
+              const Icon = TEMPLATE_ICONS[template.id] ?? QrCode;
+              const isLaunching = launchingTemplateId === template.id;
+              return (
+                <button
+                  key={template.id}
+                  type="button"
+                  disabled={launchingTemplateId !== null}
+                  onClick={() => handleQuickLaunchTemplate(template)}
+                  className="flex items-center justify-between gap-2 rounded-lg border border-border bg-canvas px-3 py-2.5 text-left transition-colors hover:border-action-green disabled:opacity-60"
+                >
+                  <div className="flex min-w-0 items-center gap-2.5">
+                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border bg-surface text-ink">
+                      <Icon className="h-4 w-4" />
+                    </span>
+                    <div className="min-w-0">
+                      <p className="truncate text-xs font-semibold text-ink">
+                        {template.title}
+                      </p>
+                      <p className="truncate text-[11px] text-ink-muted">
+                        {template.category}
+                      </p>
+                    </div>
+                  </div>
+                  {isLaunching ? (
+                    <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-action-green" />
+                  ) : (
+                    <Plus className="h-3.5 w-3.5 shrink-0 text-action-green" />
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </section>
+      ) : null}
 
       {/* Inspection Logs */}
       <section aria-labelledby="inspection-logs-heading">

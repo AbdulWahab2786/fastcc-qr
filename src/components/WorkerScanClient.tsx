@@ -13,17 +13,20 @@ import {
   FileText,
   Globe,
   Loader2,
+  MessageCircle,
   ShieldCheck,
   Wrench,
   XCircle,
 } from "lucide-react";
 import { stampInspectionPhoto } from "@/lib/photo-watermark";
 import { createClient } from "@/lib/supabase/client";
+import { buildFaultyWhatsAppAlertUrl } from "@/lib/whatsapp";
 import {
   getDemoQrRecord,
   getDemoSopSteps,
   getLocalQrRecord,
   getLocalSopSteps,
+  getQrScanUrl,
   saveLocalInspectionLog,
   saveLocalQrRecord,
 } from "@/lib/qr-utils";
@@ -53,6 +56,7 @@ interface ParsedConfig {
   fields: PaperFormField[];
   url?: string;
   fileUrl?: string;
+  managerWhatsapp?: string;
 }
 
 interface SubmittedConfirmation {
@@ -62,6 +66,8 @@ interface SubmittedConfirmation {
   submittedAt: string;
   savedLocally: boolean;
   photoName: string | null;
+  photoUrl: string | null;
+  notes: string;
 }
 
 function formatLastInspected(iso: string): string {
@@ -187,8 +193,12 @@ function parseConfigJson(config: Json): ParsedConfig {
     typeof config.fileUrl === "string" && config.fileUrl.trim()
       ? config.fileUrl.trim()
       : undefined;
+  const managerWhatsapp =
+    typeof config.manager_whatsapp === "string" && config.manager_whatsapp.trim()
+      ? config.manager_whatsapp.trim()
+      : undefined;
 
-  return { summary, checklist, fields, url, fileUrl };
+  return { summary, checklist, fields, url, fileUrl, managerWhatsapp };
 }
 
 function formatTimestampSec(seconds: number | null): string | null {
@@ -295,15 +305,26 @@ export function WorkerScanClient({
   const isLocalFallback = !initialRecord;
   const parsedConfig = parseConfigJson(record.config_json);
 
-  const effectiveType: "video_sop" | "paper_form" | "url" | "file" =
+  const hasSopOrChecklist =
+    record.type === "video_sop" ||
+    record.type === "sop" ||
+    parsedConfig.checklist.length > 0 ||
+    steps.length > 0;
+
+  const effectiveType: "video_sop" | "sop" | "paper_form" | "url" | "file" =
     record.type === "video_sop"
       ? "video_sop"
       : record.type === "paper_form"
         ? "paper_form"
-        : record.type === "url" ||
-            (record.type === "standard" && record.category === "url")
-          ? "url"
-          : "file";
+        : hasSopOrChecklist
+          ? "sop"
+          : record.type === "url" ||
+              (record.type === "standard" && record.category === "url")
+            ? "url"
+            : "file";
+
+  const isSopChecklistMode =
+    effectiveType === "video_sop" || effectiveType === "sop";
 
   const [language, setLanguage] = useState<WorkerLanguage>("English");
   const [checkedItems, setCheckedItems] = useState<Record<number, boolean>>({});
@@ -394,7 +415,7 @@ export function WorkerScanClient({
       return;
     }
 
-    if (effectiveType === "video_sop") {
+    if (isSopChecklistMode) {
       const missingRequired = checklistItems.some(
         (item, idx) => item.required && !checkedItems[idx],
       );
@@ -429,7 +450,7 @@ export function WorkerScanClient({
     const stepResultsPayload = {
       language,
       checklist_results:
-        effectiveType === "video_sop"
+        isSopChecklistMode
           ? checklistItems.map((item, idx) => ({
               label: item.label,
               required: item.required,
@@ -447,11 +468,13 @@ export function WorkerScanClient({
     setIsSubmitting(true);
     let savedLocally = isLocalFallback || !supabaseConfigured;
     const submittedAt = new Date().toISOString();
+    const trimmedNotes = notes.trim();
+    let uploadedPhotoUrl: string | null = null;
 
     if (!savedLocally) {
       try {
         const supabase = createClient();
-        const uploadedPhotoUrl = proofPhotoFile
+        uploadedPhotoUrl = proofPhotoFile
           ? await uploadInspectionPhoto(
               supabase,
               record.short_code,
@@ -464,7 +487,7 @@ export function WorkerScanClient({
           inspector_name: trimmedName,
           status,
           equipment_status: equipmentStatus,
-          notes: notes.trim() || null,
+          notes: trimmedNotes || null,
           ...(uploadedPhotoUrl ? { photo_url: uploadedPhotoUrl } : {}),
           step_results: stepResultsPayload,
         });
@@ -482,7 +505,7 @@ export function WorkerScanClient({
         inspector_name: trimmedName,
         status,
         equipment_status: equipmentStatus,
-        notes: notes.trim() || null,
+        notes: trimmedNotes || null,
         step_results: stepResultsPayload,
         created_at: submittedAt,
       });
@@ -505,6 +528,8 @@ export function WorkerScanClient({
       submittedAt,
       savedLocally,
       photoName: proofPhotoName,
+      photoUrl: uploadedPhotoUrl,
+      notes: trimmedNotes,
     });
   }
 
@@ -563,11 +588,13 @@ export function WorkerScanClient({
               <ClipboardCheck className="h-4 w-4" />
               {effectiveType === "video_sop"
                 ? "Video SOP"
-                : effectiveType === "paper_form"
-                  ? "Digital Form"
-                  : effectiveType === "url"
-                    ? "Operational Link"
-                    : "Shop-Floor Reference"}
+                : effectiveType === "sop"
+                  ? "SOP & Checklist"
+                  : effectiveType === "paper_form"
+                    ? "Digital Form"
+                    : effectiveType === "url"
+                      ? "Operational Link"
+                      : "Shop-Floor Reference"}
             </span>
             <span className="rounded border border-border bg-canvas-muted px-2 py-0.5 font-mono text-xs text-ink-muted">
               {record.short_code}
@@ -661,6 +688,57 @@ export function WorkerScanClient({
               ) : null}
             </div>
 
+            {confirmation.equipmentStatus === "faulty" ||
+            confirmation.equipmentStatus === "maintenance" ? (
+              <div
+                className={`mt-4 rounded-xl border p-4 text-left ${
+                  confirmation.equipmentStatus === "faulty"
+                    ? "border-alert-red/40 bg-alert-red/5"
+                    : "border-amber-500/40 bg-amber-500/10"
+                }`}
+              >
+                <div className="flex items-start gap-2.5">
+                  <AlertTriangle
+                    className={`mt-0.5 h-5 w-5 shrink-0 ${
+                      confirmation.equipmentStatus === "faulty"
+                        ? "text-alert-red"
+                        : "text-amber-700"
+                    }`}
+                  />
+                  <div>
+                    <p className="text-sm font-bold text-ink">
+                      {confirmation.equipmentStatus === "faulty"
+                        ? "Fault Reported — Alert Manager Now"
+                        : "Maintenance Needed — Notify Manager"}
+                    </p>
+                    <p className="mt-0.5 text-xs text-ink-muted">
+                      {parsedConfig.managerWhatsapp
+                        ? `Pre-filled alert ready for ${parsedConfig.managerWhatsapp}.`
+                        : "Opens WhatsApp with a pre-filled report so you can pick your manager or operations group."}
+                    </p>
+                  </div>
+                </div>
+                <a
+                  href={buildFaultyWhatsAppAlertUrl({
+                    managerWhatsapp: parsedConfig.managerWhatsapp,
+                    equipmentStatus: confirmation.equipmentStatus,
+                    machineTitle: record.title,
+                    workerName: confirmation.inspectorName,
+                    timestampIso: confirmation.submittedAt,
+                    notes: confirmation.notes,
+                    photoUrl: confirmation.photoUrl,
+                    viewLogUrl: getQrScanUrl(record.short_code),
+                  })}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="mt-3 flex min-h-12 w-full items-center justify-center gap-2 rounded-lg bg-action-green px-4 text-sm font-bold text-white transition-opacity hover:opacity-95"
+                >
+                  <MessageCircle className="h-5 w-5 shrink-0" />
+                  Send Instant Alert on WhatsApp
+                </a>
+              </div>
+            ) : null}
+
             <button
               type="button"
               onClick={handleResetConfirmation}
@@ -671,7 +749,7 @@ export function WorkerScanClient({
           </section>
         ) : (
           <>
-            {effectiveType === "video_sop" ? (
+            {isSopChecklistMode ? (
               <>
                 <section className="space-y-3">
                   <h2 className="text-xs font-semibold uppercase tracking-wide text-ink-muted">
@@ -967,7 +1045,7 @@ export function WorkerScanClient({
               </section>
             ) : null}
 
-            {effectiveType === "video_sop" || effectiveType === "paper_form" ? (
+            {isSopChecklistMode || effectiveType === "paper_form" ? (
               <form
                 onSubmit={handleSubmitLog}
                 className="rounded-xl border border-border bg-surface p-5"
