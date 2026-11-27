@@ -1,6 +1,13 @@
 "use client";
 
-import { useRef, useState, useSyncExternalStore, type ChangeEvent, type FormEvent } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type ChangeEvent,
+  type FormEvent,
+} from "react";
 import Link from "next/link";
 import {
   AlertTriangle,
@@ -24,6 +31,13 @@ import { stampInspectionPhoto } from "@/lib/photo-watermark";
 import { createClient } from "@/lib/supabase/client";
 import { buildFaultyWhatsAppAlertUrl } from "@/lib/whatsapp";
 import {
+  getWorkerStrings,
+  isWorkerLang,
+  WORKER_LANGS,
+  type WorkerLang,
+  type WorkerStrings,
+} from "@/lib/worker-i18n";
+import {
   getDemoQrRecord,
   getDemoSopSteps,
   getLocalQrRecord,
@@ -36,14 +50,51 @@ import type { PaperFormField, VideoSopChecklistItem } from "@/types/ai";
 import type { EquipmentStatus, InspectionStatus, Json } from "@/types/database";
 import type { QrCodeRow, SopStepRow } from "@/types/qr";
 
-const WORKER_LANGUAGES = [
-  "English",
-  "Hindi",
-  "Hinglish",
-  "Telugu",
-  "Tamil",
-] as const;
-type WorkerLanguage = (typeof WORKER_LANGUAGES)[number];
+const WORKER_LANG_STORAGE_KEY = "fastcc_worker_lang";
+const workerLangListeners = new Set<() => void>();
+
+function subscribeWorkerLang(listener: () => void): () => void {
+  workerLangListeners.add(listener);
+  if (typeof window === "undefined") return () => {};
+  const onStorage = (e: StorageEvent) => {
+    if (e.key === WORKER_LANG_STORAGE_KEY) listener();
+  };
+  window.addEventListener("storage", onStorage);
+  return () => {
+    workerLangListeners.delete(listener);
+    window.removeEventListener("storage", onStorage);
+  };
+}
+
+function getWorkerLangSnapshot(): WorkerLang {
+  if (typeof window === "undefined") return "en";
+  try {
+    const stored = window.localStorage.getItem(WORKER_LANG_STORAGE_KEY);
+    return isWorkerLang(stored) ? stored : "en";
+  } catch {
+    return "en";
+  }
+}
+
+function getWorkerLangServerSnapshot(): WorkerLang {
+  return "en";
+}
+
+function setStoredWorkerLang(nextLang: WorkerLang): void {
+  if (typeof window !== "undefined") {
+    try {
+      window.localStorage.setItem(WORKER_LANG_STORAGE_KEY, nextLang);
+    } catch {
+      // Ignore storage errors (e.g. private browsing).
+    }
+  }
+  workerLangListeners.forEach((listener) => listener());
+}
+
+interface CachedWorkerTranslation {
+  title: string;
+  items: string[];
+}
 
 interface WorkerScanClientProps {
   routeId: string;
@@ -73,12 +124,12 @@ interface SubmittedConfirmation {
   notes: string;
 }
 
-function formatLastInspected(iso: string): string {
+function formatLastInspected(iso: string, justNowLabel: string): string {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return iso;
   const diffMs = Date.now() - date.getTime();
   const diffMins = Math.floor(diffMs / 60_000);
-  if (diffMins < 1) return "Just now";
+  if (diffMins < 1) return justNowLabel;
   if (diffMins < 60) return `${diffMins}m ago`;
   const diffHours = Math.floor(diffMins / 60);
   if (diffHours < 24) return `${diffHours}h ago`;
@@ -91,7 +142,10 @@ function formatLastInspected(iso: string): string {
   });
 }
 
-function getLiveStatusMeta(status: EquipmentStatus): {
+function getLiveStatusMeta(
+  status: EquipmentStatus,
+  t: WorkerStrings,
+): {
   label: string;
   badgeClass: string;
   dotClass: string;
@@ -99,14 +153,14 @@ function getLiveStatusMeta(status: EquipmentStatus): {
   switch (status) {
     case "maintenance":
       return {
-        label: "NEEDS MAINTENANCE",
+        label: t.statusMaintenanceBadge,
         badgeClass:
           "border-amber-500/40 bg-amber-500/10 text-amber-700",
         dotClass: "bg-amber-500",
       };
     case "faulty":
       return {
-        label: "FAULTY — DO NOT USE",
+        label: t.statusFaultyBadge,
         badgeClass:
           "border-alert-red/40 bg-alert-red/10 text-alert-red",
         dotClass: "bg-alert-red",
@@ -114,7 +168,7 @@ function getLiveStatusMeta(status: EquipmentStatus): {
     case "ok":
     default:
       return {
-        label: "OPERATIONAL (OK)",
+        label: t.statusOkBadge,
         badgeClass:
           "border-action-green/40 bg-action-green/10 text-action-green",
         dotClass: "bg-action-green",
@@ -213,23 +267,28 @@ function formatTimestampSec(seconds: number | null): string | null {
 
 function getStepLocalizedText(
   step: SopStepRow,
-  language: WorkerLanguage,
+  legacyLanguageKey: string,
+  fallbackTitle?: string,
+  fallbackInstruction?: string,
 ): { title: string; instruction: string } {
   if (isRecord(step.translations_json)) {
-    const entry = step.translations_json[language];
+    const entry = step.translations_json[legacyLanguageKey];
     if (isRecord(entry)) {
       const trTitle =
         typeof entry.title === "string" && entry.title.trim()
           ? entry.title.trim()
-          : step.title;
+          : fallbackTitle || step.title;
       const trDesc =
         typeof entry.description === "string" && entry.description.trim()
           ? entry.description.trim()
-          : step.instruction;
+          : fallbackInstruction || step.instruction;
       return { title: trTitle, instruction: trDesc };
     }
   }
-  return { title: step.title, instruction: step.instruction };
+  return {
+    title: fallbackTitle || step.title,
+    instruction: fallbackInstruction || step.instruction,
+  };
 }
 
 function getSafeExternalUrl(raw: string | null | undefined): string | null {
@@ -329,7 +388,18 @@ export function WorkerScanClient({
   const isSopChecklistMode =
     effectiveType === "video_sop" || effectiveType === "sop";
 
-  const [language, setLanguage] = useState<WorkerLanguage>("English");
+  const lang = useSyncExternalStore(
+    subscribeWorkerLang,
+    getWorkerLangSnapshot,
+    getWorkerLangServerSnapshot,
+  );
+  const t = getWorkerStrings(lang);
+  const activeLangMeta =
+    WORKER_LANGS.find((entry) => entry.code === lang) ?? WORKER_LANGS[0];
+  const [translatedCache, setTranslatedCache] = useState<
+    Record<string, CachedWorkerTranslation>
+  >({});
+  const [translatingKey, setTranslatingKey] = useState<string | null>(null);
   const [checkedItems, setCheckedItems] = useState<Record<number, boolean>>({});
   const [formValues, setFormValues] = useState<Record<string, string>>({});
   const [fieldPhotoNames, setFieldPhotoNames] = useState<Record<string, string>>(
@@ -363,7 +433,7 @@ export function WorkerScanClient({
     reportedStatus ?? record.current_status ?? "ok";
   const liveLastInspectedAt =
     reportedInspectedAt ?? record.last_inspected_at ?? null;
-  const liveStatusMeta = getLiveStatusMeta(liveEquipmentStatus);
+  const liveStatusMeta = getLiveStatusMeta(liveEquipmentStatus, t);
   const scheduleStatus = getScheduleStatus(
     {
       config_json: record.config_json,
@@ -377,6 +447,144 @@ export function WorkerScanClient({
     parsedConfig.checklist.length > 0
       ? parsedConfig.checklist
       : steps.map((s) => ({ label: s.title, required: s.is_critical }));
+
+  const summaryText = parsedConfig.summary ?? record.description ?? "";
+
+  const translationSourceItems: string[] = [summaryText];
+  for (const step of steps) {
+    translationSourceItems.push(step.title, step.instruction ?? "");
+  }
+  for (const item of checklistItems) {
+    translationSourceItems.push(item.label);
+  }
+  if (effectiveType === "paper_form") {
+    for (const field of parsedConfig.fields) {
+      translationSourceItems.push(field.label);
+    }
+  }
+  const translationRequestBody = JSON.stringify({
+    targetLang: lang,
+    title: record.title,
+    items: translationSourceItems.slice(0, 40),
+  });
+  const hasTranslatableContent =
+    Boolean(record.title.trim()) ||
+    translationSourceItems.some((item) => item.trim().length > 0);
+
+  const activeCacheKey = `${record.id}:${lang}`;
+  const activeTranslation =
+    lang === "en" ? undefined : translatedCache[activeCacheKey];
+  const isTranslatingSop = lang !== "en" && translatingKey === activeCacheKey;
+
+  useEffect(() => {
+    if (lang === "en") return;
+    const cacheKey = `${record.id}:${lang}`;
+    if (translatedCache[cacheKey]) return;
+    if (!hasTranslatableContent) return;
+
+    let cancelled = false;
+    const storageKey = `fastcc_tr_${record.id}_${lang}`;
+
+    async function loadTranslation() {
+      try {
+        const cachedRaw = window.sessionStorage.getItem(storageKey);
+        if (cachedRaw) {
+          const parsed = JSON.parse(cachedRaw) as unknown;
+          if (
+            isRecord(parsed) &&
+            typeof parsed.title === "string" &&
+            Array.isArray(parsed.items)
+          ) {
+            if (!cancelled) {
+              setTranslatedCache((prev) => ({
+                ...prev,
+                [cacheKey]: {
+                  title: parsed.title as string,
+                  items: (parsed.items as unknown[]).map((entry) =>
+                    typeof entry === "string" ? entry : "",
+                  ),
+                },
+              }));
+            }
+            return;
+          }
+        }
+      } catch {
+        // Ignore sessionStorage read errors.
+      }
+
+      if (!cancelled) {
+        setTranslatingKey(cacheKey);
+      }
+
+      try {
+        const res = await fetch("/api/ai/translate-worker", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: translationRequestBody,
+        });
+        if (!res.ok) return;
+        const data = (await res.json()) as unknown;
+        if (
+          !cancelled &&
+          isRecord(data) &&
+          typeof data.title === "string" &&
+          Array.isArray(data.items)
+        ) {
+          const entry: CachedWorkerTranslation = {
+            title: data.title,
+            items: data.items.map((item) =>
+              typeof item === "string" ? item : "",
+            ),
+          };
+          setTranslatedCache((prev) => ({ ...prev, [cacheKey]: entry }));
+          try {
+            window.sessionStorage.setItem(storageKey, JSON.stringify(entry));
+          } catch {
+            // Ignore sessionStorage write errors.
+          }
+        }
+      } catch {
+        // Silent fallback to English.
+      } finally {
+        if (!cancelled) {
+          setTranslatingKey((prev) => (prev === cacheKey ? null : prev));
+        }
+      }
+    }
+
+    void loadTranslation();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    lang,
+    record.id,
+    translatedCache,
+    hasTranslatableContent,
+    translationRequestBody,
+  ]);
+
+  const displayTitle = activeTranslation?.title || record.title;
+  const displaySummary =
+    (activeTranslation?.items[0] || summaryText).trim() || null;
+
+  const checklistOffset = 1 + steps.length * 2;
+  const fieldsOffset = checklistOffset + checklistItems.length;
+
+  function getChecklistDisplayLabel(idx: number, fallbackLabel: string): string {
+    if (lang === "en") return fallbackLabel;
+    return activeTranslation?.items[checklistOffset + idx] || fallbackLabel;
+  }
+
+  function getFieldDisplayLabel(field: PaperFormField, idx: number): string {
+    if (lang === "en") return field.label;
+    return (
+      field.translations[activeLangMeta.legacyKey] ??
+      activeTranslation?.items[fieldsOffset + idx] ??
+      field.label
+    );
+  }
 
   function toggleChecklistItem(idx: number) {
     setCheckedItems((prev) => ({ ...prev, [idx]: !prev[idx] }));
@@ -425,7 +633,7 @@ export function WorkerScanClient({
 
     const trimmedName = workerName.trim();
     if (!trimmedName) {
-      setSubmitError("Please enter your name before submitting the log.");
+      setSubmitError(t.errWorkerNameRequired);
       return;
     }
 
@@ -434,21 +642,22 @@ export function WorkerScanClient({
         (item, idx) => item.required && !checkedItems[idx],
       );
       if (missingRequired) {
-        setSubmitError(
-          "Please complete all required QC checklist items before submitting.",
-        );
+        setSubmitError(t.errChecklistRequired);
         return;
       }
     }
 
     if (effectiveType === "paper_form") {
-      const missingField = parsedConfig.fields.find(
+      const missingFieldIndex = parsedConfig.fields.findIndex(
         (field) => field.required && !formValues[field.id]?.trim(),
       );
-      if (missingField) {
-        const localizedLabel =
-          missingField.translations[language] ?? missingField.label;
-        setSubmitError(`Please complete required field: "${localizedLabel}".`);
+      if (missingFieldIndex !== -1) {
+        const missingField = parsedConfig.fields[missingFieldIndex];
+        const localizedLabel = getFieldDisplayLabel(
+          missingField,
+          missingFieldIndex,
+        );
+        setSubmitError(`${t.errFieldRequiredPrefix} "${localizedLabel}".`);
         return;
       }
     }
@@ -462,7 +671,7 @@ export function WorkerScanClient({
     }
 
     const stepResultsPayload = {
-      language,
+      language: activeLangMeta.legacyKey,
       checklist_results:
         isSopChecklistMode
           ? checklistItems.map((item, idx) => ({
@@ -564,40 +773,52 @@ export function WorkerScanClient({
     setSubmitError(null);
   }
 
-  const showLanguageSwitcher =
-    effectiveType === "video_sop" || effectiveType === "paper_form";
   const safeExternalUrl = getSafeExternalUrl(
     parsedConfig.url ?? parsedConfig.fileUrl ?? record.description,
   );
+  const schedulePillText = scheduleStatus.isOverdue
+    ? t.inspectionOverdue
+    : scheduleStatus.schedule === "daily"
+      ? t.dailyCheck
+      : scheduleStatus.schedule === "weekly"
+        ? t.weeklyCheck
+        : scheduleStatus.schedule === "monthly"
+          ? t.monthlyCheck
+          : `${scheduleStatus.scheduleLabel} Check`;
 
   return (
     <main className="min-h-screen bg-canvas text-ink">
-      {showLanguageSwitcher ? (
-        <div className="sticky top-0 z-20 border-b border-border bg-surface/95 backdrop-blur-sm">
-          <div className="mx-auto flex max-w-lg items-center gap-2 overflow-x-auto px-4 py-2.5">
-            <span className="inline-flex shrink-0 items-center gap-1 text-xs font-semibold text-ink-muted">
-              <Globe className="h-4 w-4" />
+      <div className="sticky top-0 z-20 border-b border-border bg-surface/95 backdrop-blur-sm">
+        <div className="mx-auto flex max-w-lg items-center gap-1.5 overflow-x-auto px-4 py-2">
+          <span className="inline-flex shrink-0 items-center text-ink-muted">
+            <Globe className="h-4 w-4" />
+          </span>
+          {WORKER_LANGS.map((entry) => {
+            const active = lang === entry.code;
+            return (
+              <button
+                key={entry.code}
+                type="button"
+                onClick={() => setStoredWorkerLang(entry.code)}
+                aria-pressed={active}
+                className={`min-h-11 shrink-0 rounded-lg border px-3 text-xs font-semibold transition-colors sm:text-sm ${
+                  active
+                    ? "border-ink bg-ink text-white"
+                    : "border-border bg-canvas text-ink hover:bg-canvas-muted"
+                }`}
+              >
+                {entry.shortLabel}
+              </button>
+            );
+          })}
+          {isTranslatingSop ? (
+            <span className="ml-auto inline-flex shrink-0 items-center gap-1.5 rounded-full border border-utility-blue/30 bg-utility-blue/10 px-2.5 py-1 text-[11px] font-semibold text-utility-blue">
+              <Loader2 className="h-3 w-3 animate-spin" />
+              {t.translatingSop}
             </span>
-            {WORKER_LANGUAGES.map((lang) => {
-              const active = language === lang;
-              return (
-                <button
-                  key={lang}
-                  type="button"
-                  onClick={() => setLanguage(lang)}
-                  className={`min-h-12 shrink-0 rounded-lg border px-3.5 text-sm font-semibold transition-colors ${
-                    active
-                      ? "border-ink bg-ink text-white"
-                      : "border-border bg-canvas text-ink hover:bg-canvas-muted"
-                  }`}
-                >
-                  {lang}
-                </button>
-              );
-            })}
-          </div>
+          ) : null}
         </div>
-      ) : null}
+      </div>
 
       <div className="mx-auto flex max-w-lg flex-col gap-5 px-4 py-6">
         <header className="rounded-xl border border-border bg-surface p-5">
@@ -605,14 +826,14 @@ export function WorkerScanClient({
             <span className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-action-green">
               <ClipboardCheck className="h-4 w-4" />
               {effectiveType === "video_sop"
-                ? "Video SOP"
+                ? t.videoSop
                 : effectiveType === "sop"
-                  ? "SOP & Checklist"
+                  ? t.sopAndChecklist
                   : effectiveType === "paper_form"
-                    ? "Digital Form"
+                    ? t.digitalForm
                     : effectiveType === "url"
-                      ? "Operational Link"
-                      : "Shop-Floor Reference"}
+                      ? t.operationalLink
+                      : t.shopFloorReference}
             </span>
             <span className="rounded border border-border bg-canvas-muted px-2 py-0.5 font-mono text-xs text-ink-muted">
               {record.short_code}
@@ -620,7 +841,7 @@ export function WorkerScanClient({
           </div>
 
           <h1 className="mt-2.5 text-xl font-bold tracking-tight text-ink">
-            {record.title}
+            {displayTitle}
           </h1>
 
           <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-canvas px-3 py-2.5">
@@ -649,22 +870,21 @@ export function WorkerScanClient({
                         : "text-action-green"
                     }`}
                   />
-                  {scheduleStatus.isOverdue
-                    ? "Inspection Overdue"
-                    : `${scheduleStatus.scheduleLabel} Check`}
+                  {schedulePillText}
                 </span>
               ) : null}
               {liveLastInspectedAt ? (
                 <span className="font-mono text-xs text-ink-muted">
-                  Last inspected: {formatLastInspected(liveLastInspectedAt)}
+                  {t.lastInspected}:{" "}
+                  {formatLastInspected(liveLastInspectedAt, t.justNow)}
                 </span>
               ) : null}
             </div>
           </div>
 
-          {parsedConfig.summary || record.description ? (
+          {displaySummary ? (
             <p className="mt-1.5 text-sm leading-relaxed text-ink-muted">
-              {parsedConfig.summary ?? record.description}
+              {displaySummary}
             </p>
           ) : null}
 
@@ -682,10 +902,10 @@ export function WorkerScanClient({
               <CheckCircle2 className="h-8 w-8" />
             </div>
             <h2 className="mt-3 text-xl font-bold text-ink">
-              Logged Successfully
+              {t.loggedSuccessfully}
             </h2>
             <p className="mt-1 text-sm text-ink-muted">
-              Inspection recorded for{" "}
+              {t.inspectionRecordedFor}{" "}
               <span className="font-semibold text-ink">
                 {confirmation.inspectorName}
               </span>
@@ -694,7 +914,7 @@ export function WorkerScanClient({
 
             <div className="mt-4 space-y-2 rounded-lg border border-border bg-canvas p-4 text-left text-sm">
               <div className="flex items-center justify-between">
-                <span className="text-ink-muted">Status</span>
+                <span className="text-ink-muted">{t.statusLabel}</span>
                 <span
                   className={`inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs font-semibold uppercase ${
                     confirmation.status === "fail"
@@ -706,22 +926,22 @@ export function WorkerScanClient({
                 </span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-ink-muted">Equipment Status</span>
+                <span className="text-ink-muted">{t.equipmentStatus}</span>
                 <span
-                  className={`inline-flex items-center gap-1.5 rounded border px-2 py-0.5 font-mono text-xs font-semibold ${getLiveStatusMeta(confirmation.equipmentStatus).badgeClass}`}
+                  className={`inline-flex items-center gap-1.5 rounded border px-2 py-0.5 font-mono text-xs font-semibold ${getLiveStatusMeta(confirmation.equipmentStatus, t).badgeClass}`}
                 >
-                  {getLiveStatusMeta(confirmation.equipmentStatus).label}
+                  {getLiveStatusMeta(confirmation.equipmentStatus, t).label}
                 </span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-ink-muted">Timestamp</span>
+                <span className="text-ink-muted">{t.timestampLabel}</span>
                 <span className="font-mono text-xs text-ink">
                   {new Date(confirmation.submittedAt).toLocaleString()}
                 </span>
               </div>
               {confirmation.photoName ? (
                 <div className="flex items-center justify-between">
-                  <span className="text-ink-muted">Photo Proof</span>
+                  <span className="text-ink-muted">{t.photoProof}</span>
                   <span className="truncate font-mono text-xs text-ink">
                     {confirmation.photoName}
                   </span>
@@ -729,7 +949,7 @@ export function WorkerScanClient({
               ) : null}
               {confirmation.signatureDataUrl ? (
                 <div className="flex items-center justify-between gap-3 pt-1">
-                  <span className="text-ink-muted">Worker Signature</span>
+                  <span className="text-ink-muted">{t.workerSignatureLabel}</span>
                   <div className="rounded border border-border bg-white p-1">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
@@ -762,8 +982,8 @@ export function WorkerScanClient({
                   <div>
                     <p className="text-sm font-bold text-ink">
                       {confirmation.equipmentStatus === "faulty"
-                        ? "Fault Reported — Alert Manager Now"
-                        : "Maintenance Needed — Notify Manager"}
+                        ? t.faultReportedTitle
+                        : t.maintenanceNeededTitle}
                     </p>
                     <p className="mt-0.5 text-xs text-ink-muted">
                       {parsedConfig.managerWhatsapp
@@ -788,7 +1008,7 @@ export function WorkerScanClient({
                   className="mt-3 flex min-h-12 w-full items-center justify-center gap-2 rounded-lg bg-action-green px-4 text-sm font-bold text-white transition-opacity hover:opacity-95"
                 >
                   <MessageCircle className="h-5 w-5 shrink-0" />
-                  Send Instant Alert on WhatsApp
+                  {t.sendWhatsappAlert}
                 </a>
               </div>
             ) : null}
@@ -798,7 +1018,7 @@ export function WorkerScanClient({
               onClick={handleResetConfirmation}
               className="mt-5 min-h-12 w-full rounded-lg border border-border bg-surface px-4 text-sm font-semibold text-ink transition-colors hover:bg-canvas-muted"
             >
-              Submit Another Log
+              {t.submitAnotherLog}
             </button>
           </section>
         ) : (
@@ -807,16 +1027,30 @@ export function WorkerScanClient({
               <>
                 <section className="space-y-3">
                   <h2 className="text-xs font-semibold uppercase tracking-wide text-ink-muted">
-                    Step-by-Step Instructions ({steps.length})
+                    {t.sopInstructions} ({steps.length})
                   </h2>
                   {steps.length === 0 ? (
                     <div className="rounded-xl border border-border bg-surface p-5 text-sm text-ink-muted">
-                      No SOP steps attached yet. Complete the QC checklist below
-                      to log your inspection.
+                      {t.noSopSteps}
                     </div>
                   ) : (
-                    steps.map((step) => {
-                      const localized = getStepLocalizedText(step, language);
+                    steps.map((step, stepIdx) => {
+                      const fallbackStepTitle =
+                        lang === "en"
+                          ? step.title
+                          : activeTranslation?.items[1 + stepIdx * 2] ||
+                            step.title;
+                      const fallbackStepInstruction =
+                        lang === "en"
+                          ? step.instruction
+                          : activeTranslation?.items[1 + stepIdx * 2 + 1] ||
+                            step.instruction;
+                      const localized = getStepLocalizedText(
+                        step,
+                        activeLangMeta.legacyKey,
+                        fallbackStepTitle,
+                        fallbackStepInstruction,
+                      );
                       const timeLabel = formatTimestampSec(step.timestamp_sec);
                       return (
                         <article
@@ -853,7 +1087,7 @@ export function WorkerScanClient({
                           {step.is_critical ? (
                             <div className="mt-3 flex items-center gap-1.5 pl-10.5 text-xs font-semibold text-alert-red">
                               <AlertTriangle className="h-4 w-4 shrink-0" />
-                              Critical Safety / Quality Step
+                              {t.criticalStep}
                             </div>
                           ) : null}
                         </article>
@@ -865,20 +1099,24 @@ export function WorkerScanClient({
                 <section className="rounded-xl border border-border bg-surface p-5">
                   <div className="flex items-center justify-between gap-2">
                     <h2 className="text-sm font-semibold text-ink">
-                      QC Checklist
+                      {t.checklist}
                     </h2>
                     <span className="font-mono text-xs text-ink-muted">
                       {
                         checklistItems.filter((_, idx) => checkedItems[idx])
                           .length
                       }
-                      /{checklistItems.length} checked
+                      /{checklistItems.length} {t.checkedCountSuffix}
                     </span>
                   </div>
 
                   <div className="mt-3 space-y-2.5">
                     {checklistItems.map((item, idx) => {
                       const isChecked = Boolean(checkedItems[idx]);
+                      const displayLabel = getChecklistDisplayLabel(
+                        idx,
+                        item.label,
+                      );
                       return (
                         <button
                           key={`${item.label}-${idx}`}
@@ -902,12 +1140,12 @@ export function WorkerScanClient({
                               {isChecked ? <Check className="h-4 w-4" /> : null}
                             </span>
                             <span className="text-sm font-medium">
-                              {item.label}
+                              {displayLabel}
                             </span>
                           </div>
                           {item.required ? (
                             <span className="shrink-0 rounded bg-canvas-muted px-2 py-0.5 text-[11px] font-semibold text-ink-muted">
-                              Required
+                              {t.required}
                             </span>
                           ) : null}
                         </button>
@@ -921,12 +1159,11 @@ export function WorkerScanClient({
             {effectiveType === "paper_form" ? (
               <section className="space-y-3">
                 <h2 className="text-xs font-semibold uppercase tracking-wide text-ink-muted">
-                  Inspection Fields ({parsedConfig.fields.length})
+                  {t.inspectionFields} ({parsedConfig.fields.length})
                 </h2>
 
-                {parsedConfig.fields.map((field) => {
-                  const localizedLabel =
-                    field.translations[language] ?? field.label;
+                {parsedConfig.fields.map((field, fieldIdx) => {
+                  const localizedLabel = getFieldDisplayLabel(field, fieldIdx);
                   const value = formValues[field.id] ?? "";
 
                   return (
@@ -943,7 +1180,7 @@ export function WorkerScanClient({
                         </label>
                         {field.required ? (
                           <span className="shrink-0 rounded bg-canvas-muted px-2 py-0.5 text-[11px] font-semibold text-ink-muted">
-                            Required
+                            {t.required}
                           </span>
                         ) : null}
                       </div>
@@ -965,7 +1202,7 @@ export function WorkerScanClient({
                             }`}
                           >
                             <CheckCircle2 className="h-5 w-5" />
-                            PASS
+                            {t.passLabel}
                           </button>
                           <button
                             type="button"
@@ -982,7 +1219,7 @@ export function WorkerScanClient({
                             }`}
                           >
                             <XCircle className="h-5 w-5" />
-                            FAIL
+                            {t.failLabel}
                           </button>
                         </div>
                       ) : null}
@@ -998,7 +1235,7 @@ export function WorkerScanClient({
                               [field.id]: e.target.value,
                             }))
                           }
-                          placeholder="Enter observation..."
+                          placeholder={t.enterObservation}
                           className="mt-2.5 min-h-12 w-full rounded-lg border border-border bg-canvas px-3.5 text-sm text-ink placeholder:text-ink-muted focus:border-ink focus:outline-none"
                         />
                       ) : null}
@@ -1025,8 +1262,8 @@ export function WorkerScanClient({
                           <Camera className="h-5 w-5 text-utility-blue" />
                           <span className="truncate">
                             {fieldPhotoNames[field.id]
-                              ? `Captured: ${fieldPhotoNames[field.id]}`
-                              : "Tap to Capture Photo"}
+                              ? `${t.capturedPrefix} ${fieldPhotoNames[field.id]}`
+                              : t.tapToCapturePhoto}
                           </span>
                           <input
                             id={`field-${field.id}`}
@@ -1050,7 +1287,7 @@ export function WorkerScanClient({
               <section className="rounded-xl border border-border bg-surface p-5">
                 <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-utility-blue">
                   <ShieldCheck className="h-4 w-4" />
-                  Verified Operational Destination
+                  {t.verifiedOperationalDest}
                 </div>
                 {safeExternalUrl ? (
                   <>
@@ -1063,13 +1300,13 @@ export function WorkerScanClient({
                       rel="noopener noreferrer"
                       className="mt-4 flex min-h-12 w-full items-center justify-center gap-2 rounded-lg bg-utility-blue px-4 text-sm font-semibold text-white transition-opacity hover:opacity-90"
                     >
-                      Open Link
+                      {t.openLink}
                       <ExternalLink className="h-4 w-4" />
                     </a>
                   </>
                 ) : (
                   <p className="mt-2 text-sm text-ink-muted">
-                    {record.description || "No destination URL provided."}
+                    {displaySummary || "No destination URL provided."}
                   </p>
                 )}
               </section>
@@ -1079,11 +1316,10 @@ export function WorkerScanClient({
               <section className="rounded-xl border border-border bg-surface p-5">
                 <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-ink-muted">
                   <FileText className="h-4 w-4" />
-                  Document / Instructions
+                  {t.documentInstructions}
                 </div>
                 <div className="mt-3 whitespace-pre-wrap rounded-lg border border-border bg-canvas p-4 text-sm leading-relaxed text-ink">
-                  {record.description ||
-                    "No instructions added to this QR yet."}
+                  {displaySummary || "No instructions added to this QR yet."}
                 </div>
                 {safeExternalUrl ? (
                   <a
@@ -1092,7 +1328,7 @@ export function WorkerScanClient({
                     rel="noopener noreferrer"
                     className="mt-4 flex min-h-12 w-full items-center justify-center gap-2 rounded-lg bg-utility-blue px-4 text-sm font-semibold text-white transition-opacity hover:opacity-90"
                   >
-                    Open File
+                    {t.openFile}
                     <ExternalLink className="h-4 w-4" />
                   </a>
                 ) : null}
@@ -1105,10 +1341,10 @@ export function WorkerScanClient({
                 className="rounded-xl border border-border bg-surface p-5"
               >
                 <h2 className="text-sm font-semibold text-ink">
-                  Submit Inspection Log
+                  {t.submitInspection}
                 </h2>
                 <p className="mt-0.5 text-xs text-ink-muted">
-                  Zero-login sign-off — timestamped automatically.
+                  {t.zeroLoginSignoff}
                 </p>
 
                 <div className="mt-4 space-y-4">
@@ -1117,7 +1353,7 @@ export function WorkerScanClient({
                       htmlFor="worker-name"
                       className="block text-xs font-semibold uppercase tracking-wide text-ink-muted"
                     >
-                      Worker Name *
+                      {t.workerName} *
                     </label>
                     <input
                       id="worker-name"
@@ -1125,14 +1361,14 @@ export function WorkerScanClient({
                       required
                       value={workerName}
                       onChange={(e) => setWorkerName(e.target.value)}
-                      placeholder="e.g. Rajesh Kumar"
+                      placeholder={t.workerNamePlaceholder}
                       className="mt-1.5 min-h-12 w-full rounded-lg border border-border bg-canvas px-3.5 text-sm text-ink placeholder:text-ink-muted focus:border-ink focus:outline-none"
                     />
                   </div>
 
                   <div>
                     <span className="block text-xs font-semibold uppercase tracking-wide text-ink-muted">
-                      Equipment Status *
+                      {t.equipmentStatus} *
                     </span>
                     <div
                       role="radiogroup"
@@ -1151,7 +1387,7 @@ export function WorkerScanClient({
                         }`}
                       >
                         <CheckCircle2 className="h-4 w-4 shrink-0" />
-                        <span>OK</span>
+                        <span>{t.ok}</span>
                       </button>
 
                       <button
@@ -1166,7 +1402,7 @@ export function WorkerScanClient({
                         }`}
                       >
                         <Wrench className="h-4 w-4 shrink-0" />
-                        <span>Needs Maintenance</span>
+                        <span>{t.needsMaintenance}</span>
                       </button>
 
                       <button
@@ -1181,7 +1417,7 @@ export function WorkerScanClient({
                         }`}
                       >
                         <XCircle className="h-4 w-4 shrink-0" />
-                        <span>Faulty</span>
+                        <span>{t.faulty}</span>
                       </button>
                     </div>
                   </div>
@@ -1189,11 +1425,11 @@ export function WorkerScanClient({
                   <div>
                     <div className="flex flex-wrap items-center justify-between gap-1.5">
                       <span className="block text-xs font-semibold uppercase tracking-wide text-ink-muted">
-                        Camera Photo Proof (Optional)
+                        {t.photoProof}
                       </span>
                       <span className="inline-flex items-center gap-1 rounded border border-utility-blue/30 bg-utility-blue/10 px-2 py-0.5 text-[11px] font-medium text-utility-blue">
                         <ShieldCheck className="h-3 w-3" />
-                        Live Camera Proof • Auto-stamped with Time &amp; GPS
+                        {t.liveCameraProofBadge}
                       </span>
                     </div>
                     <label className="mt-1.5 flex min-h-12 cursor-pointer items-center justify-center gap-2 rounded-lg border border-dashed border-border bg-canvas px-4 text-sm font-semibold text-ink transition-colors hover:bg-canvas-muted">
@@ -1204,10 +1440,10 @@ export function WorkerScanClient({
                       )}
                       <span className="truncate">
                         {isStampingPhoto
-                          ? "Stamping Time & GPS..."
+                          ? t.stampingTimeGps
                           : proofPhotoName
-                            ? `Photo attached: ${proofPhotoName}`
-                            : "Take Photo Proof"}
+                            ? `${t.photoAttachedPrefix} ${proofPhotoName}`
+                            : t.takePhotoProof}
                       </span>
                       <input
                         type="file"
@@ -1234,14 +1470,14 @@ export function WorkerScanClient({
                       htmlFor="worker-notes"
                       className="block text-xs font-semibold uppercase tracking-wide text-ink-muted"
                     >
-                      Notes (Optional)
+                      {t.notesObservations}
                     </label>
                     <input
                       id="worker-notes"
                       type="text"
                       value={notes}
                       onChange={(e) => setNotes(e.target.value)}
-                      placeholder="Any defect or shift note..."
+                      placeholder={t.notesPlaceholder}
                       className="mt-1.5 min-h-12 w-full rounded-lg border border-border bg-canvas px-3.5 text-sm text-ink placeholder:text-ink-muted focus:border-ink focus:outline-none"
                     />
                   </div>
@@ -1250,6 +1486,12 @@ export function WorkerScanClient({
                     key={signaturePadKey}
                     onChange={setSignatureDataUrl}
                     disabled={isSubmitting}
+                    labels={{
+                      title: t.workerDigitalSignature,
+                      signed: t.signedBadge,
+                      clear: t.clear,
+                      hint: t.signHereHint,
+                    }}
                   />
 
                   {submitError ? (
@@ -1267,12 +1509,12 @@ export function WorkerScanClient({
                     {isSubmitting ? (
                       <>
                         <Loader2 className="h-5 w-5 animate-spin" />
-                        Submitting Log...
+                        {t.submitting}
                       </>
                     ) : (
                       <>
                         <CheckCircle2 className="h-5 w-5" />
-                        Submit Inspection Log
+                        {t.submitInspection}
                       </>
                     )}
                   </button>

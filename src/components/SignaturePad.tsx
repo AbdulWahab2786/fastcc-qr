@@ -14,10 +14,18 @@ interface Point {
   y: number;
 }
 
+interface SignaturePadLabels {
+  title?: string;
+  signed?: string;
+  clear?: string;
+  hint?: string;
+}
+
 interface SignaturePadProps {
   onChange: (dataUrl: string | null) => void;
   disabled?: boolean;
   height?: number;
+  labels?: SignaturePadLabels;
 }
 
 const MAX_EXPORT_WIDTH = 400;
@@ -91,6 +99,7 @@ export function SignaturePad({
   onChange,
   disabled = false,
   height = 148,
+  labels,
 }: SignaturePadProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -255,12 +264,12 @@ export function SignaturePad({
       <div className="flex items-center justify-between gap-2">
         <span className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-ink-muted">
           <PenTool className="h-3.5 w-3.5 text-utility-blue" />
-          Worker Digital Signature (Optional)
+          {labels?.title ?? "Worker Digital Signature (Optional)"}
         </span>
         <div className="flex items-center gap-2">
           {hasSignature ? (
             <span className="rounded border border-action-green/30 bg-action-green/10 px-2 py-0.5 font-mono text-[10px] font-semibold uppercase text-action-green">
-              Signed
+              {labels?.signed ?? "Signed"}
             </span>
           ) : null}
           <button
@@ -270,7 +279,7 @@ export function SignaturePad({
             className="inline-flex min-h-11 items-center gap-1.5 rounded-lg border border-border bg-canvas px-3 text-xs font-semibold text-ink transition-colors hover:bg-canvas-muted disabled:cursor-not-allowed disabled:opacity-45"
           >
             <RotateCcw className="h-3.5 w-3.5" />
-            Clear
+            {labels?.clear ?? "Clear"}
           </button>
         </div>
       </div>
@@ -294,7 +303,7 @@ export function SignaturePad({
         {!hasSignature ? (
           <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center px-4 text-center">
             <span className="text-xs font-medium text-ink-muted/75">
-              Sign here with finger or mouse
+              {labels?.hint ?? "Sign here with finger or mouse"}
             </span>
             <span className="mt-2 h-px w-44 border-b border-dashed border-border" />
           </div>
