@@ -10,6 +10,7 @@ import {
   Check,
   CheckCircle2,
   ClipboardCheck,
+  Clock,
   Copy,
   Download,
   ExternalLink,
@@ -52,6 +53,7 @@ import {
   INDUSTRY_TEMPLATES,
   type IndustryTemplate,
 } from "@/lib/industry-templates";
+import { getScheduleStatus } from "@/lib/inspection-schedule";
 import { createClient } from "@/lib/supabase/client";
 import {
   createGuestQrCode,
@@ -194,9 +196,10 @@ export function DashboardClient({
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [errorBanner, setErrorBanner] = useState<string | null>(null);
   const [csvUpgradePrompt, setCsvUpgradePrompt] = useState(false);
-  const [statusFilter, setStatusFilter] = useState<"all" | EquipmentStatus>(
-    "all",
-  );
+  const [statusFilter, setStatusFilter] = useState<
+    "all" | EquipmentStatus | "overdue"
+  >("all");
+  const [nowMs] = useState<number>(() => Date.now());
   const [folderFilter, setFolderFilter] = useState<string>("all");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   const [isBulkPrintOpen, setIsBulkPrintOpen] = useState(false);
@@ -270,25 +273,34 @@ export function DashboardClient({
   }, [qrCodes, folderFilter]);
 
   const statusCounts = useMemo(() => {
-    const counts: Record<"all" | EquipmentStatus, number> = {
+    const counts: Record<"all" | EquipmentStatus | "overdue", number> = {
       all: folderFilteredQrCodes.length,
       faulty: 0,
       maintenance: 0,
       ok: 0,
+      overdue: 0,
     };
     for (const qr of folderFilteredQrCodes) {
       const status = qr.current_status ?? "ok";
       counts[status] += 1;
+      if (getScheduleStatus(qr, nowMs).isOverdue) {
+        counts.overdue += 1;
+      }
     }
     return counts;
-  }, [folderFilteredQrCodes]);
+  }, [folderFilteredQrCodes, nowMs]);
 
   const filteredQrCodes = useMemo(() => {
     if (statusFilter === "all") return folderFilteredQrCodes;
+    if (statusFilter === "overdue") {
+      return folderFilteredQrCodes.filter(
+        (qr) => getScheduleStatus(qr, nowMs).isOverdue,
+      );
+    }
     return folderFilteredQrCodes.filter(
       (qr) => (qr.current_status ?? "ok") === statusFilter,
     );
-  }, [folderFilteredQrCodes, statusFilter]);
+  }, [folderFilteredQrCodes, statusFilter, nowMs]);
 
   const visibleQrIds = useMemo(
     () => filteredQrCodes.map((qr) => qr.id),
@@ -812,12 +824,13 @@ export function DashboardClient({
                     { id: "faulty", label: "Faulty" },
                     { id: "maintenance", label: "Maintenance" },
                     { id: "ok", label: "OK" },
+                    { id: "overdue", label: "Overdue" },
                   ] as const
                 ).map((pill) => {
                   const active = statusFilter === pill.id;
                   const count = statusCounts[pill.id];
                   const activeClasses =
-                    pill.id === "faulty"
+                    pill.id === "faulty" || pill.id === "overdue"
                       ? "border-alert-red bg-alert-red text-white"
                       : pill.id === "maintenance"
                         ? "border-amber-500 bg-amber-500 text-white"
@@ -834,11 +847,16 @@ export function DashboardClient({
                       className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
                         active
                           ? activeClasses
-                          : "border-border bg-surface text-ink-muted hover:bg-canvas-muted hover:text-ink"
+                          : pill.id === "overdue" && count > 0
+                            ? "border-alert-red/40 bg-alert-red/5 text-alert-red hover:bg-alert-red/10"
+                            : "border-border bg-surface text-ink-muted hover:bg-canvas-muted hover:text-ink"
                       }`}
                     >
                       <span>{pill.label}</span>
-                      <span className="font-mono text-[11px] opacity-80">
+                      <span
+                        suppressHydrationWarning
+                        className="font-mono text-[11px] opacity-80"
+                      >
                         {count}
                       </span>
                     </button>
@@ -1003,6 +1021,7 @@ export function DashboardClient({
                     const isCopied = copiedCode === qr.short_code;
                     const isDeleting = deletingId === qr.id;
                     const isSelected = selectedIds.has(qr.id);
+                    const scheduleStatus = getScheduleStatus(qr, nowMs);
                     return (
                       <tr
                         key={qr.id}
@@ -1040,6 +1059,32 @@ export function DashboardClient({
                               />
                               {getQrFolder(qr)}
                             </span>
+                            {scheduleStatus.schedule !== "none" ? (
+                              scheduleStatus.isOverdue ? (
+                                <span
+                                  title={`${scheduleStatus.scheduleLabel} • ${scheduleStatus.label}`}
+                                  suppressHydrationWarning
+                                  className="inline-flex items-center gap-1 rounded border border-alert-red/40 bg-alert-red/10 px-1.5 py-0.5 font-mono text-[11px] font-semibold text-alert-red"
+                                >
+                                  <Clock className="h-3 w-3" />
+                                  OVERDUE
+                                  <span className="font-normal">
+                                    · {scheduleStatus.scheduleLabel} •{" "}
+                                    {scheduleStatus.label}
+                                  </span>
+                                </span>
+                              ) : (
+                                <span
+                                  title={`${scheduleStatus.scheduleLabel} • ${scheduleStatus.label}`}
+                                  suppressHydrationWarning
+                                  className="inline-flex items-center gap-1 rounded border border-action-green/25 bg-action-green/5 px-1.5 py-0.5 font-mono text-[11px] text-action-green"
+                                >
+                                  <Clock className="h-3 w-3" />
+                                  {scheduleStatus.scheduleLabel} •{" "}
+                                  {scheduleStatus.label}
+                                </span>
+                              )
+                            ) : null}
                           </div>
                           {qr.description ? (
                             <div className="mt-0.5 max-w-xs truncate text-xs text-ink-muted">

@@ -19,6 +19,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { SignaturePad } from "@/components/SignaturePad";
+import { getScheduleStatus } from "@/lib/inspection-schedule";
 import { stampInspectionPhoto } from "@/lib/photo-watermark";
 import { createClient } from "@/lib/supabase/client";
 import { buildFaultyWhatsAppAlertUrl } from "@/lib/whatsapp";
@@ -356,12 +357,21 @@ export function WorkerScanClient({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [confirmation, setConfirmation] =
     useState<SubmittedConfirmation | null>(null);
+  const [nowMs] = useState<number>(() => Date.now());
 
   const liveEquipmentStatus: EquipmentStatus =
     reportedStatus ?? record.current_status ?? "ok";
   const liveLastInspectedAt =
     reportedInspectedAt ?? record.last_inspected_at ?? null;
   const liveStatusMeta = getLiveStatusMeta(liveEquipmentStatus);
+  const scheduleStatus = getScheduleStatus(
+    {
+      config_json: record.config_json,
+      last_inspected_at: liveLastInspectedAt,
+      created_at: record.created_at,
+    },
+    nowMs,
+  );
 
   const checklistItems: VideoSopChecklistItem[] =
     parsedConfig.checklist.length > 0
@@ -622,11 +632,34 @@ export function WorkerScanClient({
               />
               {liveStatusMeta.label}
             </span>
-            {liveLastInspectedAt ? (
-              <span className="font-mono text-xs text-ink-muted">
-                Last inspected: {formatLastInspected(liveLastInspectedAt)}
-              </span>
-            ) : null}
+            <div className="flex flex-wrap items-center gap-2">
+              {scheduleStatus.schedule !== "none" ? (
+                <span
+                  suppressHydrationWarning
+                  className={`inline-flex items-center gap-1 rounded border px-2 py-0.5 font-mono text-[11px] font-semibold ${
+                    scheduleStatus.isOverdue
+                      ? "border-alert-red/40 bg-alert-red/10 text-alert-red"
+                      : "border-border bg-surface text-ink-muted"
+                  }`}
+                >
+                  <Clock
+                    className={`h-3 w-3 ${
+                      scheduleStatus.isOverdue
+                        ? "text-alert-red"
+                        : "text-action-green"
+                    }`}
+                  />
+                  {scheduleStatus.isOverdue
+                    ? "Inspection Overdue"
+                    : `${scheduleStatus.scheduleLabel} Check`}
+                </span>
+              ) : null}
+              {liveLastInspectedAt ? (
+                <span className="font-mono text-xs text-ink-muted">
+                  Last inspected: {formatLastInspected(liveLastInspectedAt)}
+                </span>
+              ) : null}
+            </div>
           </div>
 
           {parsedConfig.summary || record.description ? (

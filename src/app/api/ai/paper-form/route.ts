@@ -11,6 +11,7 @@ import {
 } from "@/lib/ai/gemini";
 import { isPaidPlan } from "@/lib/billing/constants";
 import { incrementUserAiSopsUsed } from "@/lib/billing/plans";
+import { normalizeInspectionSchedule } from "@/lib/inspection-schedule";
 import type { Json } from "@/types/database";
 import type {
   PaperFormApiResponse,
@@ -205,6 +206,9 @@ export async function POST(request: Request) {
     folderEntry.trim().toLowerCase() !== "unassigned"
       ? folderEntry.trim()
       : undefined;
+  const inspectionSchedule = normalizeInspectionSchedule(
+    formData.get("inspection_schedule"),
+  );
 
   let ai: ReturnType<typeof getGeminiClient>;
   try {
@@ -257,6 +261,9 @@ export async function POST(request: Request) {
       languages,
       ...(managerWhatsapp ? { manager_whatsapp: managerWhatsapp } : {}),
       ...(folder ? { folder } : {}),
+      ...(inspectionSchedule !== "none"
+        ? { inspection_schedule: inspectionSchedule }
+        : {}),
     } as unknown as Json;
 
     const persisted = await persistAiQrRecord({

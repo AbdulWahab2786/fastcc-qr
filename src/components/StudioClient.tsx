@@ -20,6 +20,7 @@ import {
   Lock,
   MessageCircle,
   Folder,
+  Clock,
 } from "lucide-react";
 import { QrCodePreview } from "@/components/QrCodePreview";
 import {
@@ -33,6 +34,12 @@ import {
   type AuditDateRange,
 } from "@/lib/audit-report-export";
 import { isPaidPlan } from "@/lib/billing/constants";
+import {
+  getQrSchedule,
+  INSPECTION_SCHEDULE_OPTIONS,
+  normalizeInspectionSchedule,
+  type InspectionSchedule,
+} from "@/lib/inspection-schedule";
 import {
   downloadStickerPng,
   downloadStickerSvg,
@@ -148,6 +155,10 @@ export function StudioClient({
   const initialFolder = getQrFolderRaw(record);
   const [folderOverride, setFolderOverride] = useState<string | null>(null);
   const folderValue = folderOverride ?? initialFolder;
+  const initialSchedule = getQrSchedule(record);
+  const [scheduleOverride, setScheduleOverride] =
+    useState<InspectionSchedule | null>(null);
+  const inspectionSchedule = scheduleOverride ?? initialSchedule;
   const activeFolderLabel =
     folderValue.trim() && folderValue.trim().toLowerCase() !== "unassigned"
       ? folderValue.trim()
@@ -323,6 +334,12 @@ export function StudioClient({
       baseConfig.folder = trimmedFolder;
     } else {
       delete baseConfig.folder;
+    }
+
+    if (inspectionSchedule !== "none") {
+      baseConfig.inspection_schedule = inspectionSchedule;
+    } else {
+      delete baseConfig.inspection_schedule;
     }
 
     const nextConfigJson = baseConfig as Json;
@@ -739,6 +756,35 @@ export function StudioClient({
                   <option key={folder} value={folder} />
                 ))}
               </datalist>
+            </div>
+
+            <div>
+              <label
+                htmlFor="studio-inspection-schedule"
+                className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-ink-muted"
+              >
+                <Clock className="h-3.5 w-3.5 text-utility-blue" />
+                Inspection Schedule
+              </label>
+              <select
+                id="studio-inspection-schedule"
+                value={inspectionSchedule}
+                onChange={(e) => {
+                  setScheduleOverride(
+                    normalizeInspectionSchedule(e.target.value),
+                  );
+                  setLabelSavedNotice(false);
+                  setLabelSaveError(null);
+                }}
+                disabled={!canPersistAlertSettings}
+                className="mt-1.5 w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-ink outline-none focus:border-utility-blue disabled:cursor-not-allowed disabled:bg-canvas-muted"
+              >
+                {INSPECTION_SCHEDULE_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
             </div>
 
             {labelSaveError ? (

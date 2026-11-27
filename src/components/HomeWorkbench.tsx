@@ -32,6 +32,7 @@ import {
   X,
   ClipboardList,
   Folder,
+  Clock,
 } from "lucide-react";
 import { QrCodePreview } from "@/components/QrCodePreview";
 import {
@@ -42,6 +43,11 @@ import {
   parseSopStepsFromText,
   type IndustryTemplate,
 } from "@/lib/industry-templates";
+import {
+  INSPECTION_SCHEDULE_OPTIONS,
+  normalizeInspectionSchedule,
+  type InspectionSchedule,
+} from "@/lib/inspection-schedule";
 import { createClient } from "@/lib/supabase/client";
 import { hasSupabaseEnv } from "@/lib/supabase/env";
 import {
@@ -120,6 +126,8 @@ export function HomeWorkbench({ initialTemplateId }: HomeWorkbenchProps) {
   const [newChecklistLabel, setNewChecklistLabel] = useState("");
   const [managerWhatsapp, setManagerWhatsapp] = useState("");
   const [siteFolder, setSiteFolder] = useState("");
+  const [inspectionSchedule, setInspectionSchedule] =
+    useState<InspectionSchedule>("none");
   const [remoteFolders, setRemoteFolders] = useState<string[]>([]);
   const [createdFolders, setCreatedFolders] = useState<string[]>([]);
 
@@ -257,15 +265,24 @@ export function HomeWorkbench({ initialTemplateId }: HomeWorkbenchProps) {
     const normalizedFolder =
       rawFolder && rawFolder.toLowerCase() !== "unassigned" ? rawFolder : "";
 
+    const urlConfigObj: Record<string, Json> = {};
+    if (normalizedFolder) {
+      urlConfigObj.folder = normalizedFolder;
+    }
+    if (inspectionSchedule !== "none") {
+      urlConfigObj.inspection_schedule = inspectionSchedule;
+    }
+
     const configJson: Json | undefined = isUrlTab
-      ? normalizedFolder
-        ? ({ folder: normalizedFolder } as Json)
+      ? Object.keys(urlConfigObj).length > 0
+        ? (urlConfigObj as Json)
         : undefined
       : buildSopConfigJson({
           summary: selectedTemplate?.description,
           checklist: checklistItems,
           managerWhatsapp: trimmedWhatsapp,
           folder: normalizedFolder,
+          inspectionSchedule,
         });
 
     const result = await createGuestQrCode({
@@ -369,6 +386,9 @@ export function HomeWorkbench({ initialTemplateId }: HomeWorkbenchProps) {
     if (normalizedFolder) {
       formData.append("folder", normalizedFolder);
     }
+    if (inspectionSchedule !== "none") {
+      formData.append("inspection_schedule", inspectionSchedule);
+    }
 
     setIsAiProcessing(true);
     setAiStatusMessage(
@@ -440,6 +460,9 @@ export function HomeWorkbench({ initialTemplateId }: HomeWorkbenchProps) {
             languages: [aiLanguage],
             ...(trimmedWhatsapp ? { manager_whatsapp: trimmedWhatsapp } : {}),
             ...(normalizedFolder ? { folder: normalizedFolder } : {}),
+            ...(inspectionSchedule !== "none"
+              ? { inspection_schedule: inspectionSchedule }
+              : {}),
           } as unknown as Json,
           show_watermark: Boolean(videoResult.show_watermark ?? true),
           scan_count: 0,
@@ -493,6 +516,9 @@ export function HomeWorkbench({ initialTemplateId }: HomeWorkbenchProps) {
             languages: [aiLanguage],
             ...(trimmedWhatsapp ? { manager_whatsapp: trimmedWhatsapp } : {}),
             ...(normalizedFolder ? { folder: normalizedFolder } : {}),
+            ...(inspectionSchedule !== "none"
+              ? { inspection_schedule: inspectionSchedule }
+              : {}),
           } as unknown as Json,
           show_watermark: Boolean(paperResult.show_watermark ?? true),
           scan_count: 0,
@@ -738,23 +764,50 @@ export function HomeWorkbench({ initialTemplateId }: HomeWorkbenchProps) {
                       className="mt-1.5 w-full rounded-lg border border-border bg-surface px-3.5 py-2.5 font-mono text-sm text-ink outline-none focus:border-utility-blue"
                     />
                   </div>
-                  <div>
-                    <label
-                      htmlFor="url-site-folder"
-                      className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-ink-muted"
-                    >
-                      <Folder className="h-3.5 w-3.5 text-utility-blue" />
-                      Location / Site Folder (Optional)
-                    </label>
-                    <input
-                      id="url-site-folder"
-                      type="text"
-                      list="workbench-folder-suggestions"
-                      value={siteFolder}
-                      onChange={(e) => setSiteFolder(e.target.value)}
-                      placeholder="e.g., Main Kitchen, Floor 2, Warehouse A"
-                      className="mt-1.5 w-full rounded-lg border border-border bg-surface px-3.5 py-2.5 text-sm text-ink outline-none focus:border-utility-blue"
-                    />
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <div>
+                      <label
+                        htmlFor="url-site-folder"
+                        className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-ink-muted"
+                      >
+                        <Folder className="h-3.5 w-3.5 text-utility-blue" />
+                        Location / Site Folder (Optional)
+                      </label>
+                      <input
+                        id="url-site-folder"
+                        type="text"
+                        list="workbench-folder-suggestions"
+                        value={siteFolder}
+                        onChange={(e) => setSiteFolder(e.target.value)}
+                        placeholder="e.g., Main Kitchen, Floor 2, Warehouse A"
+                        className="mt-1.5 w-full rounded-lg border border-border bg-surface px-3.5 py-2.5 text-sm text-ink outline-none focus:border-utility-blue"
+                      />
+                    </div>
+                    <div>
+                      <label
+                        htmlFor="url-inspection-schedule"
+                        className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-ink-muted"
+                      >
+                        <Clock className="h-3.5 w-3.5 text-utility-blue" />
+                        Inspection Schedule
+                      </label>
+                      <select
+                        id="url-inspection-schedule"
+                        value={inspectionSchedule}
+                        onChange={(e) =>
+                          setInspectionSchedule(
+                            normalizeInspectionSchedule(e.target.value),
+                          )
+                        }
+                        className="mt-1.5 w-full rounded-lg border border-border bg-surface px-3.5 py-2.5 text-sm text-ink outline-none focus:border-utility-blue"
+                      >
+                        {INSPECTION_SCHEDULE_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
                   </div>
                   <div className="pt-1">
                     <button
@@ -899,8 +952,8 @@ export function HomeWorkbench({ initialTemplateId }: HomeWorkbenchProps) {
                     </div>
                   </div>
 
-                  {/* Optional Location / Site Folder & Manager WhatsApp */}
-                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  {/* Optional Location / Site Folder, Schedule & Manager WhatsApp */}
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
                     <div>
                       <label
                         htmlFor="text-site-folder"
@@ -915,9 +968,35 @@ export function HomeWorkbench({ initialTemplateId }: HomeWorkbenchProps) {
                         list="workbench-folder-suggestions"
                         value={siteFolder}
                         onChange={(e) => setSiteFolder(e.target.value)}
-                        placeholder="e.g., Main Kitchen, Floor 2 (Optional)"
+                        placeholder="e.g., Main Kitchen (Optional)"
                         className="mt-1.5 w-full rounded-lg border border-border bg-surface px-3.5 py-2.5 text-sm text-ink outline-none focus:border-utility-blue"
                       />
+                    </div>
+
+                    <div>
+                      <label
+                        htmlFor="text-inspection-schedule"
+                        className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-ink-muted"
+                      >
+                        <Clock className="h-3.5 w-3.5 text-utility-blue" />
+                        Inspection Schedule
+                      </label>
+                      <select
+                        id="text-inspection-schedule"
+                        value={inspectionSchedule}
+                        onChange={(e) =>
+                          setInspectionSchedule(
+                            normalizeInspectionSchedule(e.target.value),
+                          )
+                        }
+                        className="mt-1.5 w-full rounded-lg border border-border bg-surface px-3.5 py-2.5 text-sm text-ink outline-none focus:border-utility-blue"
+                      >
+                        {INSPECTION_SCHEDULE_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
                     </div>
 
                     <div>
@@ -1046,7 +1125,7 @@ export function HomeWorkbench({ initialTemplateId }: HomeWorkbenchProps) {
                     </div>
                   ) : null}
 
-                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
                     <div>
                       <label
                         htmlFor="ai-site-folder"
@@ -1061,9 +1140,34 @@ export function HomeWorkbench({ initialTemplateId }: HomeWorkbenchProps) {
                         list="workbench-folder-suggestions"
                         value={siteFolder}
                         onChange={(e) => setSiteFolder(e.target.value)}
-                        placeholder="e.g., Main Kitchen, Floor 2 (Optional)"
+                        placeholder="e.g., Main Kitchen (Optional)"
                         className="mt-1.5 w-full rounded-lg border border-border bg-surface px-3.5 py-2 text-sm text-ink outline-none focus:border-utility-blue"
                       />
+                    </div>
+                    <div>
+                      <label
+                        htmlFor="ai-inspection-schedule"
+                        className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-ink-muted"
+                      >
+                        <Clock className="h-3.5 w-3.5 text-utility-blue" />
+                        Inspection Schedule
+                      </label>
+                      <select
+                        id="ai-inspection-schedule"
+                        value={inspectionSchedule}
+                        onChange={(e) =>
+                          setInspectionSchedule(
+                            normalizeInspectionSchedule(e.target.value),
+                          )
+                        }
+                        className="mt-1.5 w-full rounded-lg border border-border bg-surface px-3.5 py-2 text-sm text-ink outline-none focus:border-utility-blue"
+                      >
+                        {INSPECTION_SCHEDULE_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
                     </div>
                     <div>
                       <label

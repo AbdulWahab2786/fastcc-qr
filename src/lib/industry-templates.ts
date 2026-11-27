@@ -1,3 +1,4 @@
+import type { InspectionSchedule } from "@/lib/inspection-schedule";
 import type { VideoSopChecklistItem } from "@/types/ai";
 import type { Json } from "@/types/database";
 
@@ -257,6 +258,7 @@ export function buildSopConfigJson(params: {
   checklist: readonly VideoSopChecklistItem[];
   managerWhatsapp?: string;
   folder?: string;
+  inspectionSchedule?: InspectionSchedule;
 }): Json {
   const payload: Record<string, Json> = {
     checklist: params.checklist.map((item) => ({
@@ -278,6 +280,10 @@ export function buildSopConfigJson(params: {
   const trimmedFolder = params.folder?.trim();
   if (trimmedFolder && trimmedFolder.toLowerCase() !== "unassigned") {
     payload.folder = trimmedFolder;
+  }
+
+  if (params.inspectionSchedule && params.inspectionSchedule !== "none") {
+    payload.inspection_schedule = params.inspectionSchedule;
   }
 
   return payload;
