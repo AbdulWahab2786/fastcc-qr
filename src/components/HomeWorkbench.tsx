@@ -590,7 +590,7 @@ export function HomeWorkbench({ initialTemplateId }: HomeWorkbenchProps) {
   ];
 
   return (
-    <main className="mx-auto max-w-6xl px-4 py-8 sm:px-6 sm:py-10">
+    <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6 sm:py-10">
       {/* Subtle Local Fallback Banner */}
       {bannerNotice ? (
         <div className="mb-5 flex items-center gap-2.5 rounded-lg border border-border bg-surface px-4 py-2.5 text-xs text-ink-muted">
@@ -621,17 +621,44 @@ export function HomeWorkbench({ initialTemplateId }: HomeWorkbenchProps) {
 
       {/* Hero 2-Column CaoLiao-Style Workbench */}
       <section id="workbench-top" aria-label="Instant QR Workbench">
-        <div className="mb-5 flex flex-col justify-between gap-2 sm:flex-row sm:items-end">
-          <div>
+        <div className="mb-5 flex flex-col justify-between gap-3 sm:flex-row sm:items-end">
+          <div className="max-w-3xl">
+            <div className="mb-2 flex flex-wrap items-center gap-2">
+              <span className="inline-flex items-center rounded-md border border-action-green/30 bg-action-green/10 px-2.5 py-0.5 font-mono text-[11px] font-semibold uppercase tracking-wide text-action-green">
+                Industrial QR SOP, Audit &amp; Inspection Platform
+              </span>
+              <span className="inline-flex items-center rounded-md border border-border bg-surface px-2.5 py-0.5 font-mono text-[11px] font-medium text-ink-muted">
+                Zero Worker Login • 10-Second Setup
+              </span>
+            </div>
             <h1 className="text-2xl font-semibold tracking-tight text-ink sm:text-3xl">
-              Instant Operations QR &amp; SOP Generator
+              QR SOPs &amp; Live-Photo Audits for Indian Factories, Cloud Kitchens &amp; Warehouses
             </h1>
-            <p className="mt-1 text-sm text-ink-muted">
-              No login required. Generate a permanent QR code, print a shop-floor
-              label, and log frontline checks.
+            <p className="mt-1.5 text-sm text-ink-muted">
+              Generate permanent machine QR stickers in seconds. Workers scan
+              with no app or login in 5 Indian languages, capture GPS-stamped
+              live photos, and managers export 1-click FSSAI / ISO audit PDFs.
             </p>
+            <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px] font-medium text-ink">
+              <span className="inline-flex items-center gap-1 rounded border border-border bg-surface px-2 py-0.5">
+                <CheckCircle2 className="h-3 w-3 text-action-green" />
+                Live GPS Photo Proof
+              </span>
+              <span className="inline-flex items-center gap-1 rounded border border-border bg-surface px-2 py-0.5">
+                <CheckCircle2 className="h-3 w-3 text-action-green" />
+                EN • हिन्दी • తెలుగు • मराठी • தமிழ்
+              </span>
+              <span className="inline-flex items-center gap-1 rounded border border-border bg-surface px-2 py-0.5">
+                <CheckCircle2 className="h-3 w-3 text-action-green" />
+                WhatsApp Faulty Alerts
+              </span>
+              <span className="inline-flex items-center gap-1 rounded border border-border bg-surface px-2 py-0.5">
+                <CheckCircle2 className="h-3 w-3 text-action-green" />
+                A4 Sticker &amp; Audit PDF Export
+              </span>
+            </div>
           </div>
-          <span className="inline-flex w-fit items-center gap-1.5 rounded-md border border-border bg-surface px-2.5 py-1 font-mono text-xs text-ink-muted">
+          <span className="inline-flex w-fit shrink-0 items-center gap-1.5 rounded-md border border-border bg-surface px-2.5 py-1 font-mono text-xs text-ink-muted">
             ECC Level H • Permanent ID
           </span>
         </div>
@@ -1409,6 +1436,6 @@ export function HomeWorkbench({ initialTemplateId }: HomeWorkbenchProps) {
           })}
         </div>
       </section>
-    </main>
+    </div>
   );
 }

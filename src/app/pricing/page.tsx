@@ -9,7 +9,7 @@ import type { PlanTier } from "@/types/database";
 export const metadata: Metadata = {
   title: "Pricing — FastCC QR",
   description:
-    "Simple INR pricing for industrial QR labels, AI Video-to-SOP, and frontline inspection tracking.",
+    "Transparent INR pricing for industrial QR SOPs, live GPS photo proof, 5-language worker checklists, A4 sticker sheets, and FSSAI/ISO audit PDF exports.",
 };
 
 async function PricingContent() {
