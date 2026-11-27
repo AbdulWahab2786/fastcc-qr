@@ -7,7 +7,7 @@ export function Footer() {
       className="no-print mt-auto border-t border-border bg-surface print:hidden"
     >
       <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
-        <div className="grid gap-8 sm:grid-cols-3">
+        <div className="grid gap-8 sm:grid-cols-2 lg:grid-cols-[1.4fr_1fr_1fr_1fr]">
           <div>
             <div className="flex items-center gap-2">
               {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -80,6 +80,44 @@ export function Footer() {
               </li>
             </ul>
           </div>
+
+          <div>
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-ink">
+              Company &amp; Legal
+            </h3>
+            <ul className="mt-2.5 space-y-2 text-xs text-ink-muted">
+              <li>
+                <Link href="/about" className="hover:text-ink hover:underline">
+                  About Us
+                </Link>
+              </li>
+              <li>
+                <Link href="/contact" className="hover:text-ink hover:underline">
+                  Contact Us
+                </Link>
+              </li>
+              <li>
+                <Link href="/privacy" className="hover:text-ink hover:underline">
+                  Privacy Policy
+                </Link>
+              </li>
+              <li>
+                <Link href="/terms" className="hover:text-ink hover:underline">
+                  Terms &amp; Conditions
+                </Link>
+              </li>
+              <li>
+                <Link href="/refund-policy" className="hover:text-ink hover:underline">
+                  Refund Policy
+                </Link>
+              </li>
+            </ul>
+          </div>
+        </div>
+
+        <div className="mt-8 flex flex-col gap-2 border-t border-border pt-6 text-xs text-ink-muted sm:flex-row sm:items-center sm:justify-between">
+          <p>&copy; 2026 FastCC Corp. All rights reserved.</p>
+          <p>Built with ❤️ in Hyderabad</p>
         </div>
       </div>
     </footer>
