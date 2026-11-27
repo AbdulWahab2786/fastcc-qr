@@ -256,6 +256,7 @@ export function buildSopConfigJson(params: {
   summary?: string;
   checklist: readonly VideoSopChecklistItem[];
   managerWhatsapp?: string;
+  folder?: string;
 }): Json {
   const payload: Record<string, Json> = {
     checklist: params.checklist.map((item) => ({
@@ -272,6 +273,11 @@ export function buildSopConfigJson(params: {
   const trimmedWhatsapp = params.managerWhatsapp?.trim();
   if (trimmedWhatsapp) {
     payload.manager_whatsapp = trimmedWhatsapp;
+  }
+
+  const trimmedFolder = params.folder?.trim();
+  if (trimmedFolder && trimmedFolder.toLowerCase() !== "unassigned") {
+    payload.folder = trimmedFolder;
   }
 
   return payload;

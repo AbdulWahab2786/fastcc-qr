@@ -19,6 +19,7 @@ import {
   LayoutTemplate,
   Lock,
   MessageCircle,
+  Folder,
 } from "lucide-react";
 import { QrCodePreview } from "@/components/QrCodePreview";
 import {
@@ -38,9 +39,13 @@ import {
   type StudioLayoutPreset,
 } from "@/lib/qr-export";
 import {
+  EMPTY_FOLDER_SUGGESTIONS,
   getDemoQrRecord,
+  getLocalFolderSuggestions,
   getLocalInspectionLogs,
   getLocalQrRecord,
+  getQrFolder,
+  getQrFolderRaw,
   getQrScanUrl,
   saveLocalQrRecord,
 } from "@/lib/qr-utils";
@@ -55,6 +60,7 @@ interface StudioClientProps {
   isAuthenticated: boolean;
   userPlan: PlanTier | null;
   currentUserId: string | null;
+  existingFolders?: string[];
 }
 
 type LogoMode = "fastcc" | "custom" | "none";
@@ -104,6 +110,7 @@ export function StudioClient({
   isAuthenticated,
   userPlan,
   currentUserId,
+  existingFolders = [],
 }: StudioClientProps) {
   const localRecord = useSyncExternalStore(
     subscribeNoop,
@@ -138,7 +145,22 @@ export function StudioClient({
     string | null
   >(null);
   const managerWhatsapp = managerWhatsappOverride ?? initialManagerWhatsapp;
+  const initialFolder = getQrFolderRaw(record);
+  const [folderOverride, setFolderOverride] = useState<string | null>(null);
+  const folderValue = folderOverride ?? initialFolder;
+  const activeFolderLabel =
+    folderValue.trim() && folderValue.trim().toLowerCase() !== "unassigned"
+      ? folderValue.trim()
+      : getQrFolder(record);
+  const localFolderSuggestions = useSyncExternalStore(
+    subscribeNoop,
+    getLocalFolderSuggestions,
+    () => EMPTY_FOLDER_SUGGESTIONS,
+  );
+  const [savedFolders, setSavedFolders] = useState<string[]>([]);
   const [savingAlertSettings, setSavingAlertSettings] = useState(false);
+  const [labelSavedNotice, setLabelSavedNotice] = useState(false);
+  const [labelSaveError, setLabelSaveError] = useState<string | null>(null);
   const [alertSavedNotice, setAlertSavedNotice] = useState(false);
   const [alertSaveError, setAlertSaveError] = useState<string | null>(null);
   const [logoMode, setLogoMode] = useState<LogoMode>("fastcc");
@@ -254,11 +276,34 @@ export function StudioClient({
 
   const scanUrl = getQrScanUrl(safeShortCode);
 
-  async function handleSaveAlertSettings() {
+  const folderSuggestions = useMemo(() => {
+    const combined = new Set<string>([
+      ...existingFolders,
+      ...localFolderSuggestions,
+      ...savedFolders,
+    ]);
+    const currentTrimmed = folderValue.trim();
+    if (
+      currentTrimmed &&
+      currentTrimmed.toLowerCase() !== "unassigned"
+    ) {
+      combined.add(currentTrimmed);
+    }
+    return Array.from(combined).sort((a, b) =>
+      a.localeCompare(b, undefined, { sensitivity: "base" }),
+    );
+  }, [existingFolders, localFolderSuggestions, savedFolders, folderValue]);
+
+  async function persistQrDetails(source: "label" | "alert") {
     if (!canPersistAlertSettings) return;
     setSavingAlertSettings(true);
-    setAlertSavedNotice(false);
-    setAlertSaveError(null);
+    if (source === "label") {
+      setLabelSavedNotice(false);
+      setLabelSaveError(null);
+    } else {
+      setAlertSavedNotice(false);
+      setAlertSaveError(null);
+    }
 
     const baseConfig: Record<string, Json | undefined> = isConfigObject(
       record.config_json,
@@ -271,6 +316,13 @@ export function StudioClient({
       baseConfig.manager_whatsapp = trimmedWhatsapp;
     } else {
       delete baseConfig.manager_whatsapp;
+    }
+
+    const trimmedFolder = folderValue.trim();
+    if (trimmedFolder && trimmedFolder.toLowerCase() !== "unassigned") {
+      baseConfig.folder = trimmedFolder;
+    } else {
+      delete baseConfig.folder;
     }
 
     const nextConfigJson = baseConfig as Json;
@@ -288,7 +340,11 @@ export function StudioClient({
           .eq("id", record.id);
 
         if (error) {
-          setAlertSaveError(error.message);
+          if (source === "label") {
+            setLabelSaveError(error.message);
+          } else {
+            setAlertSaveError(error.message);
+          }
           return;
         }
       }
@@ -299,10 +355,25 @@ export function StudioClient({
         config_json: nextConfigJson,
         updated_at: new Date().toISOString(),
       });
-      setAlertSavedNotice(true);
-      setTimeout(() => setAlertSavedNotice(false), 2500);
+      if (trimmedFolder && trimmedFolder.toLowerCase() !== "unassigned") {
+        setSavedFolders((prev) =>
+          prev.includes(trimmedFolder) ? prev : [...prev, trimmedFolder],
+        );
+      }
+      if (source === "label") {
+        setLabelSavedNotice(true);
+        setTimeout(() => setLabelSavedNotice(false), 2500);
+      } else {
+        setAlertSavedNotice(true);
+        setTimeout(() => setAlertSavedNotice(false), 2500);
+      }
     } catch {
-      setAlertSaveError("Could not save alert settings. Please try again.");
+      const msg = "Could not save QR settings. Please try again.";
+      if (source === "label") {
+        setLabelSaveError(msg);
+      } else {
+        setAlertSaveError(msg);
+      }
     } finally {
       setSavingAlertSettings(false);
     }
@@ -486,12 +557,16 @@ export function StudioClient({
             Generator
           </Link>
           <div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <h1 className="text-base font-semibold text-ink sm:text-lg">
                 QR Label &amp; Logo Studio
               </h1>
               <span className="rounded border border-border bg-canvas-muted px-2 py-0.5 font-mono text-xs text-ink">
                 {record.short_code}
+              </span>
+              <span className="inline-flex items-center gap-1 rounded border border-border bg-canvas px-2 py-0.5 font-mono text-[11px] text-ink-muted">
+                <Folder className="h-3 w-3 text-utility-blue" />
+                {activeFolderLabel}
               </span>
             </div>
             <p className="text-xs text-ink-muted">
@@ -594,9 +669,11 @@ export function StudioClient({
             </div>
           </section>
 
-          {/* Custom Text */}
+          {/* Custom Text & Site Folder */}
           <section className="rounded-xl border border-border bg-surface p-5 space-y-4">
-            <h2 className="text-sm font-semibold text-ink">Label Text</h2>
+            <h2 className="text-sm font-semibold text-ink">
+              Label Text &amp; Site Folder
+            </h2>
 
             <div>
               <label
@@ -609,7 +686,11 @@ export function StudioClient({
                 id="studio-title"
                 type="text"
                 value={headerTitle}
-                onChange={(e) => setHeaderTitleOverride(e.target.value)}
+                onChange={(e) => {
+                  setHeaderTitleOverride(e.target.value);
+                  setLabelSavedNotice(false);
+                  setLabelSaveError(null);
+                }}
                 className="mt-1.5 w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-ink outline-none focus:border-utility-blue"
               />
             </div>
@@ -631,11 +712,66 @@ export function StudioClient({
               />
             </div>
 
-            <div className="flex items-center justify-between rounded-lg border border-border bg-canvas-muted/60 px-3 py-2 text-xs">
-              <span className="font-medium text-ink-muted">Visible ID</span>
-              <span className="font-mono font-semibold text-ink">
-                {record.short_code}
-              </span>
+            <div>
+              <label
+                htmlFor="studio-site-folder"
+                className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-ink-muted"
+              >
+                <Folder className="h-3.5 w-3.5 text-utility-blue" />
+                Location / Site Folder (Optional)
+              </label>
+              <input
+                id="studio-site-folder"
+                type="text"
+                list="studio-folder-suggestions"
+                value={folderValue}
+                onChange={(e) => {
+                  setFolderOverride(e.target.value);
+                  setLabelSavedNotice(false);
+                  setLabelSaveError(null);
+                }}
+                disabled={!canPersistAlertSettings}
+                placeholder="e.g., Main Kitchen, Floor 2, Warehouse A"
+                className="mt-1.5 w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-ink outline-none focus:border-utility-blue disabled:cursor-not-allowed disabled:bg-canvas-muted"
+              />
+              <datalist id="studio-folder-suggestions">
+                {folderSuggestions.map((folder) => (
+                  <option key={folder} value={folder} />
+                ))}
+              </datalist>
+            </div>
+
+            {labelSaveError ? (
+              <p className="text-xs text-alert-red">{labelSaveError}</p>
+            ) : null}
+
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2 rounded-lg border border-border bg-canvas-muted/60 px-3 py-2 text-xs">
+                <span className="font-medium text-ink-muted">Visible ID</span>
+                <span className="font-mono font-semibold text-ink">
+                  {record.short_code}
+                </span>
+              </div>
+
+              {canPersistAlertSettings ? (
+                <button
+                  type="button"
+                  disabled={savingAlertSettings}
+                  onClick={() => persistQrDetails("label")}
+                  className="inline-flex min-h-9 items-center justify-center gap-1.5 rounded-lg border border-border bg-canvas px-3 text-xs font-semibold text-ink transition-colors hover:bg-canvas-muted disabled:opacity-60"
+                >
+                  {labelSavedNotice ? (
+                    <>
+                      <Check className="h-3.5 w-3.5 text-action-green" />
+                      <span className="text-action-green">Saved Details</span>
+                    </>
+                  ) : savingAlertSettings ? (
+                    "Saving..."
+                  ) : (
+                    "Save Title & Folder"
+                  )}
+                </button>
+              ) : null}
             </div>
           </section>
 
@@ -683,7 +819,7 @@ export function StudioClient({
               <button
                 type="button"
                 disabled={savingAlertSettings}
-                onClick={handleSaveAlertSettings}
+                onClick={() => persistQrDetails("alert")}
                 className="inline-flex min-h-10 items-center justify-center gap-1.5 rounded-lg border border-border bg-canvas px-3.5 text-xs font-semibold text-ink transition-colors hover:bg-canvas-muted disabled:opacity-60"
               >
                 {alertSavedNotice ? (

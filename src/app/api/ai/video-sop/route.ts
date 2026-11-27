@@ -254,6 +254,13 @@ export async function POST(request: Request) {
     typeof managerWhatsappEntry === "string" && managerWhatsappEntry.trim()
       ? managerWhatsappEntry.trim()
       : undefined;
+  const folderEntry = formData.get("folder");
+  const folder =
+    typeof folderEntry === "string" &&
+    folderEntry.trim() &&
+    folderEntry.trim().toLowerCase() !== "unassigned"
+      ? folderEntry.trim()
+      : undefined;
 
   let ai: ReturnType<typeof getGeminiClient>;
   try {
@@ -330,6 +337,7 @@ export async function POST(request: Request) {
       checklist: normalized.checklist,
       languages,
       ...(managerWhatsapp ? { manager_whatsapp: managerWhatsapp } : {}),
+      ...(folder ? { folder } : {}),
     } as unknown as Json;
 
     const persisted = await persistAiQrRecord({

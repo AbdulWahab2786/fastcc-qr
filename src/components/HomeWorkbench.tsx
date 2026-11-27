@@ -1,6 +1,13 @@
 "use client";
 
-import { useEffect, useState, type DragEvent, type ChangeEvent } from "react";
+import {
+  useEffect,
+  useMemo,
+  useState,
+  useSyncExternalStore,
+  type DragEvent,
+  type ChangeEvent,
+} from "react";
 import Link from "next/link";
 import {
   Video,
@@ -24,6 +31,7 @@ import {
   Plus,
   X,
   ClipboardList,
+  Folder,
 } from "lucide-react";
 import { QrCodePreview } from "@/components/QrCodePreview";
 import {
@@ -38,6 +46,9 @@ import { createClient } from "@/lib/supabase/client";
 import { hasSupabaseEnv } from "@/lib/supabase/env";
 import {
   createGuestQrCode,
+  EMPTY_FOLDER_SUGGESTIONS,
+  extractUniqueFolders,
+  getLocalFolderSuggestions,
   getQrScanUrl,
   saveLocalQrRecord,
   saveLocalSopSteps,
@@ -69,6 +80,8 @@ interface ActivePreview {
   isLocalFallback: boolean;
   isDemo: boolean;
 }
+
+const subscribeNoop = () => () => {};
 
 interface HomeWorkbenchProps {
   initialTemplateId?: string;
@@ -106,6 +119,23 @@ export function HomeWorkbench({ initialTemplateId }: HomeWorkbenchProps) {
   );
   const [newChecklistLabel, setNewChecklistLabel] = useState("");
   const [managerWhatsapp, setManagerWhatsapp] = useState("");
+  const [siteFolder, setSiteFolder] = useState("");
+  const [remoteFolders, setRemoteFolders] = useState<string[]>([]);
+  const [createdFolders, setCreatedFolders] = useState<string[]>([]);
+
+  const localFolders = useSyncExternalStore(
+    subscribeNoop,
+    getLocalFolderSuggestions,
+    () => EMPTY_FOLDER_SUGGESTIONS,
+  );
+
+  const existingFolders = useMemo(
+    () =>
+      Array.from(
+        new Set([...localFolders, ...remoteFolders, ...createdFolders]),
+      ).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" })),
+    [localFolders, remoteFolders, createdFolders],
+  );
 
   // AI Video-to-SOP & AI Paper-to-Form inputs
   const [aiLanguage, setAiLanguage] = useState<AiLanguage>("Hinglish");
@@ -126,8 +156,18 @@ export function HomeWorkbench({ initialTemplateId }: HomeWorkbenchProps) {
     const supabase = createClient();
     supabase.auth
       .getUser()
-      .then(({ data: { user } }) => {
-        if (active) setIsAuthenticated(Boolean(user));
+      .then(async ({ data: { user } }) => {
+        if (!active) return;
+        setIsAuthenticated(Boolean(user));
+        if (!user) return;
+
+        const { data: rows } = await supabase
+          .from("qr_codes")
+          .select("config_json")
+          .eq("user_id", user.id);
+
+        if (!active || !rows) return;
+        setRemoteFolders(extractUniqueFolders(rows));
       })
       .catch(() => {
         if (active) setIsAuthenticated(false);
@@ -213,13 +253,19 @@ export function HomeWorkbench({ initialTemplateId }: HomeWorkbenchProps) {
       : selectedTemplate?.description ?? textBody;
     const category = isUrlTab ? "url" : isSopMode ? sopCategory : "text";
     const trimmedWhatsapp = managerWhatsapp.trim();
+    const rawFolder = siteFolder.trim();
+    const normalizedFolder =
+      rawFolder && rawFolder.toLowerCase() !== "unassigned" ? rawFolder : "";
 
-    const configJson = isUrlTab
-      ? undefined
+    const configJson: Json | undefined = isUrlTab
+      ? normalizedFolder
+        ? ({ folder: normalizedFolder } as Json)
+        : undefined
       : buildSopConfigJson({
           summary: selectedTemplate?.description,
           checklist: checklistItems,
           managerWhatsapp: trimmedWhatsapp,
+          folder: normalizedFolder,
         });
 
     const result = await createGuestQrCode({
@@ -238,6 +284,12 @@ export function HomeWorkbench({ initialTemplateId }: HomeWorkbenchProps) {
       );
       setIsSubmitting(false);
       return;
+    }
+
+    if (normalizedFolder) {
+      setCreatedFolders((prev) =>
+        prev.includes(normalizedFolder) ? prev : [...prev, normalizedFolder],
+      );
     }
 
     setPreview({
@@ -304,11 +356,18 @@ export function HomeWorkbench({ initialTemplateId }: HomeWorkbenchProps) {
     const endpoint =
       mode === "video" ? "/api/ai/video-sop" : "/api/ai/paper-form";
     const fieldName = mode === "video" ? "video" : "image";
+    const rawFolder = siteFolder.trim();
+    const normalizedFolder =
+      rawFolder && rawFolder.toLowerCase() !== "unassigned" ? rawFolder : "";
+
     const formData = new FormData();
     formData.append(fieldName, selectedFile);
     formData.append("languages", JSON.stringify([aiLanguage]));
     if (managerWhatsapp.trim()) {
       formData.append("manager_whatsapp", managerWhatsapp.trim());
+    }
+    if (normalizedFolder) {
+      formData.append("folder", normalizedFolder);
     }
 
     setIsAiProcessing(true);
@@ -359,6 +418,12 @@ export function HomeWorkbench({ initialTemplateId }: HomeWorkbenchProps) {
       const now = new Date().toISOString();
       const trimmedWhatsapp = managerWhatsapp.trim();
 
+      if (normalizedFolder) {
+        setCreatedFolders((prev) =>
+          prev.includes(normalizedFolder) ? prev : [...prev, normalizedFolder],
+        );
+      }
+
       if (mode === "video") {
         const videoResult = body as VideoSopApiResponse;
         saveLocalQrRecord({
@@ -374,6 +439,7 @@ export function HomeWorkbench({ initialTemplateId }: HomeWorkbenchProps) {
             checklist: videoResult.checklist,
             languages: [aiLanguage],
             ...(trimmedWhatsapp ? { manager_whatsapp: trimmedWhatsapp } : {}),
+            ...(normalizedFolder ? { folder: normalizedFolder } : {}),
           } as unknown as Json,
           show_watermark: Boolean(videoResult.show_watermark ?? true),
           scan_count: 0,
@@ -426,6 +492,7 @@ export function HomeWorkbench({ initialTemplateId }: HomeWorkbenchProps) {
             fields: paperResult.fields,
             languages: [aiLanguage],
             ...(trimmedWhatsapp ? { manager_whatsapp: trimmedWhatsapp } : {}),
+            ...(normalizedFolder ? { folder: normalizedFolder } : {}),
           } as unknown as Json,
           show_watermark: Boolean(paperResult.show_watermark ?? true),
           scan_count: 0,
@@ -671,6 +738,24 @@ export function HomeWorkbench({ initialTemplateId }: HomeWorkbenchProps) {
                       className="mt-1.5 w-full rounded-lg border border-border bg-surface px-3.5 py-2.5 font-mono text-sm text-ink outline-none focus:border-utility-blue"
                     />
                   </div>
+                  <div>
+                    <label
+                      htmlFor="url-site-folder"
+                      className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-ink-muted"
+                    >
+                      <Folder className="h-3.5 w-3.5 text-utility-blue" />
+                      Location / Site Folder (Optional)
+                    </label>
+                    <input
+                      id="url-site-folder"
+                      type="text"
+                      list="workbench-folder-suggestions"
+                      value={siteFolder}
+                      onChange={(e) => setSiteFolder(e.target.value)}
+                      placeholder="e.g., Main Kitchen, Floor 2, Warehouse A"
+                      className="mt-1.5 w-full rounded-lg border border-border bg-surface px-3.5 py-2.5 text-sm text-ink outline-none focus:border-utility-blue"
+                    />
+                  </div>
                   <div className="pt-1">
                     <button
                       type="button"
@@ -814,29 +899,50 @@ export function HomeWorkbench({ initialTemplateId }: HomeWorkbenchProps) {
                     </div>
                   </div>
 
-                  {/* Optional Manager WhatsApp Alert Number */}
-                  <div>
-                    <label
-                      htmlFor="text-manager-whatsapp"
-                      className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-ink-muted"
-                    >
-                      <MessageCircle className="h-3.5 w-3.5 text-action-green" />
-                      Manager WhatsApp Number (for Faulty Alerts)
-                    </label>
-                    <input
-                      id="text-manager-whatsapp"
-                      type="tel"
-                      value={managerWhatsapp}
-                      onChange={(e) => setManagerWhatsapp(e.target.value)}
-                      placeholder="+91 9876543210 (Optional)"
-                      className="mt-1.5 w-full rounded-lg border border-border bg-surface px-3.5 py-2.5 font-mono text-sm text-ink outline-none focus:border-utility-blue"
-                    />
-                    <p className="mt-1 text-[11px] text-ink-muted">
-                      Workers reporting Faulty or Needs Maintenance get a 1-tap
-                      WhatsApp alert pre-filled with machine, notes &amp; photo
-                      proof.
-                    </p>
+                  {/* Optional Location / Site Folder & Manager WhatsApp */}
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <div>
+                      <label
+                        htmlFor="text-site-folder"
+                        className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-ink-muted"
+                      >
+                        <Folder className="h-3.5 w-3.5 text-utility-blue" />
+                        Location / Site Folder
+                      </label>
+                      <input
+                        id="text-site-folder"
+                        type="text"
+                        list="workbench-folder-suggestions"
+                        value={siteFolder}
+                        onChange={(e) => setSiteFolder(e.target.value)}
+                        placeholder="e.g., Main Kitchen, Floor 2 (Optional)"
+                        className="mt-1.5 w-full rounded-lg border border-border bg-surface px-3.5 py-2.5 text-sm text-ink outline-none focus:border-utility-blue"
+                      />
+                    </div>
+
+                    <div>
+                      <label
+                        htmlFor="text-manager-whatsapp"
+                        className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-ink-muted"
+                      >
+                        <MessageCircle className="h-3.5 w-3.5 text-action-green" />
+                        Manager WhatsApp (Alerts)
+                      </label>
+                      <input
+                        id="text-manager-whatsapp"
+                        type="tel"
+                        value={managerWhatsapp}
+                        onChange={(e) => setManagerWhatsapp(e.target.value)}
+                        placeholder="+91 9876543210 (Optional)"
+                        className="mt-1.5 w-full rounded-lg border border-border bg-surface px-3.5 py-2.5 font-mono text-sm text-ink outline-none focus:border-utility-blue"
+                      />
+                    </div>
                   </div>
+                  <p className="-mt-2 text-[11px] text-ink-muted">
+                    Workers reporting Faulty or Needs Maintenance get a 1-tap
+                    WhatsApp alert pre-filled with machine, notes &amp; photo
+                    proof.
+                  </p>
 
                   <div className="pt-1">
                     <button
@@ -940,22 +1046,42 @@ export function HomeWorkbench({ initialTemplateId }: HomeWorkbenchProps) {
                     </div>
                   ) : null}
 
-                  <div>
-                    <label
-                      htmlFor="ai-manager-whatsapp"
-                      className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-ink-muted"
-                    >
-                      <MessageCircle className="h-3.5 w-3.5 text-action-green" />
-                      Manager WhatsApp Number (for Faulty Alerts)
-                    </label>
-                    <input
-                      id="ai-manager-whatsapp"
-                      type="tel"
-                      value={managerWhatsapp}
-                      onChange={(e) => setManagerWhatsapp(e.target.value)}
-                      placeholder="+91 9876543210 (Optional)"
-                      className="mt-1.5 w-full rounded-lg border border-border bg-surface px-3.5 py-2 font-mono text-sm text-ink outline-none focus:border-utility-blue"
-                    />
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <div>
+                      <label
+                        htmlFor="ai-site-folder"
+                        className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-ink-muted"
+                      >
+                        <Folder className="h-3.5 w-3.5 text-utility-blue" />
+                        Location / Site Folder
+                      </label>
+                      <input
+                        id="ai-site-folder"
+                        type="text"
+                        list="workbench-folder-suggestions"
+                        value={siteFolder}
+                        onChange={(e) => setSiteFolder(e.target.value)}
+                        placeholder="e.g., Main Kitchen, Floor 2 (Optional)"
+                        className="mt-1.5 w-full rounded-lg border border-border bg-surface px-3.5 py-2 text-sm text-ink outline-none focus:border-utility-blue"
+                      />
+                    </div>
+                    <div>
+                      <label
+                        htmlFor="ai-manager-whatsapp"
+                        className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-ink-muted"
+                      >
+                        <MessageCircle className="h-3.5 w-3.5 text-action-green" />
+                        Manager WhatsApp (Alerts)
+                      </label>
+                      <input
+                        id="ai-manager-whatsapp"
+                        type="tel"
+                        value={managerWhatsapp}
+                        onChange={(e) => setManagerWhatsapp(e.target.value)}
+                        placeholder="+91 9876543210 (Optional)"
+                        className="mt-1.5 w-full rounded-lg border border-border bg-surface px-3.5 py-2 font-mono text-sm text-ink outline-none focus:border-utility-blue"
+                      />
+                    </div>
                   </div>
 
                   {aiAuthRequired ? (
@@ -1041,6 +1167,12 @@ export function HomeWorkbench({ initialTemplateId }: HomeWorkbenchProps) {
                 </div>
               ) : null}
             </div>
+
+            <datalist id="workbench-folder-suggestions">
+              {existingFolders.map((folder) => (
+                <option key={folder} value={folder} />
+              ))}
+            </datalist>
           </div>
 
           {/* Right Column: Live QR Preview */}

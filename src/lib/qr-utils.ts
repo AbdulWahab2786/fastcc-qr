@@ -86,6 +86,47 @@ export function getQrScanUrl(shortCode: string, origin?: string): string {
   return resolvedOrigin ? `${resolvedOrigin}/q/${shortCode}` : `/q/${shortCode}`;
 }
 
+export const UNASSIGNED_FOLDER = "Unassigned";
+
+function isJsonObjectRecord(
+  value: Json | unknown,
+): value is Record<string, Json | undefined> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** Reads the raw trimmed folder string from `config_json.folder`, or `""` when unset. */
+export function getQrFolderRaw(qr: Pick<QrCodeRow, "config_json">): string {
+  if (!isJsonObjectRecord(qr.config_json)) return "";
+  const raw = qr.config_json.folder;
+  if (typeof raw !== "string") return "";
+  const trimmed = raw.trim();
+  if (!trimmed || trimmed.toLowerCase() === UNASSIGNED_FOLDER.toLowerCase()) {
+    return "";
+  }
+  return trimmed;
+}
+
+/** Reads `config_json.folder`, defaulting to `"Unassigned"` when empty. */
+export function getQrFolder(qr: Pick<QrCodeRow, "config_json">): string {
+  return getQrFolderRaw(qr) || UNASSIGNED_FOLDER;
+}
+
+/** Returns sorted unique non-empty folder names across a set of QR records. */
+export function extractUniqueFolders(
+  records: readonly Pick<QrCodeRow, "config_json">[],
+): string[] {
+  const seen = new Set<string>();
+  for (const record of records) {
+    const folder = getQrFolderRaw(record);
+    if (folder) {
+      seen.add(folder);
+    }
+  }
+  return Array.from(seen).sort((a, b) =>
+    a.localeCompare(b, undefined, { sensitivity: "base" }),
+  );
+}
+
 let cachedRecordsRaw: string | null = null;
 let cachedRecordsMap: Record<string, QrCodeRow> = {};
 
@@ -127,6 +168,31 @@ export function saveLocalQrRecord(record: QrCodeRow): void {
 export function getLocalQrRecord(idOrShortCode: string): QrCodeRow | null {
   const records = readLocalRecords();
   return records[idOrShortCode] ?? null;
+}
+
+let cachedFoldersRaw: string | null = null;
+let cachedFoldersList: string[] = [];
+export const EMPTY_FOLDER_SUGGESTIONS: string[] = [];
+
+export function getLocalFolderSuggestions(): string[] {
+  if (typeof window === "undefined") return EMPTY_FOLDER_SUGGESTIONS;
+  try {
+    const raw = window.localStorage.getItem(LOCAL_STORAGE_KEY);
+    if (!raw) {
+      cachedFoldersRaw = null;
+      cachedFoldersList = EMPTY_FOLDER_SUGGESTIONS;
+      return EMPTY_FOLDER_SUGGESTIONS;
+    }
+    if (raw === cachedFoldersRaw) {
+      return cachedFoldersList;
+    }
+    const records = readLocalRecords();
+    cachedFoldersRaw = raw;
+    cachedFoldersList = extractUniqueFolders(Object.values(records));
+    return cachedFoldersList;
+  } catch {
+    return EMPTY_FOLDER_SUGGESTIONS;
+  }
 }
 
 let cachedStepsRaw: string | null = null;

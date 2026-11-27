@@ -13,8 +13,10 @@ import {
   Copy,
   Download,
   ExternalLink,
+  FileSpreadsheet,
   FileText,
   Flame,
+  Folder,
   Loader2,
   Lock,
   Plus,
@@ -28,6 +30,7 @@ import {
   X,
   Zap,
 } from "lucide-react";
+import { BulkImportModal } from "@/components/BulkImportModal";
 import { BulkPrintModal } from "@/components/BulkPrintModal";
 import {
   AUDIT_DATE_RANGE_OPTIONS,
@@ -50,7 +53,12 @@ import {
   type IndustryTemplate,
 } from "@/lib/industry-templates";
 import { createClient } from "@/lib/supabase/client";
-import { createGuestQrCode, getQrScanUrl } from "@/lib/qr-utils";
+import {
+  createGuestQrCode,
+  getQrFolder,
+  getQrScanUrl,
+  UNASSIGNED_FOLDER,
+} from "@/lib/qr-utils";
 import type { EquipmentStatus, PlanTier } from "@/types/database";
 import type { InspectionLogRow, QrCodeRow } from "@/types/qr";
 
@@ -189,8 +197,10 @@ export function DashboardClient({
   const [statusFilter, setStatusFilter] = useState<"all" | EquipmentStatus>(
     "all",
   );
+  const [folderFilter, setFolderFilter] = useState<string>("all");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   const [isBulkPrintOpen, setIsBulkPrintOpen] = useState(false);
+  const [isBulkImportOpen, setIsBulkImportOpen] = useState(false);
   const [launchingTemplateId, setLaunchingTemplateId] = useState<string | null>(
     null,
   );
@@ -239,24 +249,46 @@ export function DashboardClient({
     [qrCodes],
   );
 
+  const folderOptions = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const qr of qrCodes) {
+      const folder = getQrFolder(qr);
+      counts.set(folder, (counts.get(folder) ?? 0) + 1);
+    }
+    return Array.from(counts.entries())
+      .sort(([a], [b]) => {
+        if (a === UNASSIGNED_FOLDER) return 1;
+        if (b === UNASSIGNED_FOLDER) return -1;
+        return a.localeCompare(b, undefined, { sensitivity: "base" });
+      })
+      .map(([name, count]) => ({ name, count }));
+  }, [qrCodes]);
+
+  const folderFilteredQrCodes = useMemo(() => {
+    if (folderFilter === "all") return qrCodes;
+    return qrCodes.filter((qr) => getQrFolder(qr) === folderFilter);
+  }, [qrCodes, folderFilter]);
+
   const statusCounts = useMemo(() => {
     const counts: Record<"all" | EquipmentStatus, number> = {
-      all: qrCodes.length,
+      all: folderFilteredQrCodes.length,
       faulty: 0,
       maintenance: 0,
       ok: 0,
     };
-    for (const qr of qrCodes) {
+    for (const qr of folderFilteredQrCodes) {
       const status = qr.current_status ?? "ok";
       counts[status] += 1;
     }
     return counts;
-  }, [qrCodes]);
+  }, [folderFilteredQrCodes]);
 
   const filteredQrCodes = useMemo(() => {
-    if (statusFilter === "all") return qrCodes;
-    return qrCodes.filter((qr) => (qr.current_status ?? "ok") === statusFilter);
-  }, [qrCodes, statusFilter]);
+    if (statusFilter === "all") return folderFilteredQrCodes;
+    return folderFilteredQrCodes.filter(
+      (qr) => (qr.current_status ?? "ok") === statusFilter,
+    );
+  }, [folderFilteredQrCodes, statusFilter]);
 
   const visibleQrIds = useMemo(
     () => filteredQrCodes.map((qr) => qr.id),
@@ -277,8 +309,8 @@ export function DashboardClient({
   }, [someVisibleSelected]);
 
   const selectedQrs = useMemo(
-    () => qrCodes.filter((qr) => selectedIds.has(qr.id)),
-    [qrCodes, selectedIds],
+    () => filteredQrCodes.filter((qr) => selectedIds.has(qr.id)),
+    [filteredQrCodes, selectedIds],
   );
 
   function handleToggleSelectAll() {
@@ -311,6 +343,16 @@ export function DashboardClient({
 
   function handleClearSelection() {
     setSelectedIds(new Set());
+  }
+
+  function handleBulkImported(importedQrs: QrCodeRow[]) {
+    if (importedQrs.length === 0) return;
+    setQrCodes((prev) => {
+      const existingIds = new Set(prev.map((qr) => qr.id));
+      const fresh = importedQrs.filter((qr) => !existingIds.has(qr.id));
+      return [...fresh.slice().reverse(), ...prev];
+    });
+    router.refresh();
   }
 
   async function handleQuickLaunchTemplate(template: IndustryTemplate) {
@@ -571,6 +613,14 @@ export function DashboardClient({
               <span>Upgrade</span>
             </Link>
           ) : null}
+          <button
+            type="button"
+            onClick={() => setIsBulkImportOpen(true)}
+            className="inline-flex w-fit items-center gap-2 rounded-lg border border-border bg-surface px-3.5 py-2.5 text-sm font-medium text-ink transition-colors hover:bg-canvas-muted"
+          >
+            <FileSpreadsheet className="h-4 w-4 text-utility-blue" />
+            <span>Bulk Import CSV</span>
+          </button>
           <Link
             href="/"
             className="inline-flex w-fit items-center gap-2 rounded-lg bg-action-green px-4 py-2.5 text-sm font-medium text-white transition-opacity hover:opacity-95"
@@ -734,6 +784,23 @@ export function DashboardClient({
                 })}
               </div>
 
+              <div className="flex items-center gap-1.5 rounded-lg border border-border bg-surface px-2.5 py-1">
+                <Folder className="h-3.5 w-3.5 shrink-0 text-utility-blue" />
+                <select
+                  aria-label="Filter QR codes by location folder"
+                  value={folderFilter}
+                  onChange={(e) => setFolderFilter(e.target.value)}
+                  className="bg-transparent pr-1 text-xs font-medium text-ink outline-none"
+                >
+                  <option value="all">All Folders ({qrCodes.length})</option>
+                  {folderOptions.map((folder) => (
+                    <option key={folder.name} value={folder.name}>
+                      {folder.name} ({folder.count})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
               <div
                 role="group"
                 aria-label="Filter QR codes by equipment status"
@@ -880,12 +947,27 @@ export function DashboardClient({
         ) : filteredQrCodes.length === 0 ? (
           <div className="rounded-xl border border-border bg-surface p-8 text-center">
             <p className="text-sm font-medium text-ink">
-              No QR codes match the{" "}
-              <span className="font-mono uppercase">{statusFilter}</span> filter.
+              No QR codes match the active{" "}
+              {folderFilter !== "all" ? (
+                <>
+                  folder <span className="font-mono">{folderFilter}</span>
+                  {statusFilter !== "all" ? " and " : " "}
+                </>
+              ) : null}
+              {statusFilter !== "all" ? (
+                <>
+                  status{" "}
+                  <span className="font-mono uppercase">{statusFilter}</span>{" "}
+                </>
+              ) : null}
+              filter.
             </p>
             <button
               type="button"
-              onClick={() => setStatusFilter("all")}
+              onClick={() => {
+                setFolderFilter("all");
+                setStatusFilter("all");
+              }}
               className="mt-3 inline-flex items-center rounded-lg border border-border bg-canvas px-3 py-1.5 text-xs font-medium text-ink hover:bg-canvas-muted"
             >
               Show all QR codes
@@ -938,7 +1020,27 @@ export function DashboardClient({
                           />
                         </td>
                         <td className="px-4 py-3.5">
-                          <div className="font-medium text-ink">{qr.title}</div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="font-medium text-ink">
+                              {qr.title}
+                            </span>
+                            <span
+                              className={`inline-flex items-center gap-1 rounded border px-1.5 py-0.5 font-mono text-[11px] ${
+                                getQrFolder(qr) === UNASSIGNED_FOLDER
+                                  ? "border-border bg-canvas text-ink-muted/80"
+                                  : "border-utility-blue/25 bg-utility-blue/5 text-ink"
+                              }`}
+                            >
+                              <Folder
+                                className={`h-3 w-3 ${
+                                  getQrFolder(qr) === UNASSIGNED_FOLDER
+                                    ? "text-ink-muted/70"
+                                    : "text-utility-blue"
+                                }`}
+                              />
+                              {getQrFolder(qr)}
+                            </span>
+                          </div>
                           {qr.description ? (
                             <div className="mt-0.5 max-w-xs truncate text-xs text-ink-muted">
                               {qr.description}
@@ -1323,6 +1425,14 @@ export function DashboardClient({
         onClose={() => setIsBulkPrintOpen(false)}
         selectedQrs={selectedQrs}
         plan={plan}
+      />
+
+      <BulkImportModal
+        isOpen={isBulkImportOpen}
+        onClose={() => setIsBulkImportOpen(false)}
+        existingQrCount={qrCodes.length}
+        plan={plan}
+        onImported={handleBulkImported}
       />
 
       {auditToast ? (
