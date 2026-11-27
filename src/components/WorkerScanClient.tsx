@@ -18,6 +18,7 @@ import {
   Wrench,
   XCircle,
 } from "lucide-react";
+import { SignaturePad } from "@/components/SignaturePad";
 import { stampInspectionPhoto } from "@/lib/photo-watermark";
 import { createClient } from "@/lib/supabase/client";
 import { buildFaultyWhatsAppAlertUrl } from "@/lib/whatsapp";
@@ -67,6 +68,7 @@ interface SubmittedConfirmation {
   savedLocally: boolean;
   photoName: string | null;
   photoUrl: string | null;
+  signatureDataUrl: string | null;
   notes: string;
 }
 
@@ -346,6 +348,8 @@ export function WorkerScanClient({
   const [proofPhotoPreview, setProofPhotoPreview] = useState<string | null>(
     null,
   );
+  const [signatureDataUrl, setSignatureDataUrl] = useState<string | null>(null);
+  const [signaturePadKey, setSignaturePadKey] = useState(0);
   const [isStampingPhoto, setIsStampingPhoto] = useState(false);
   const stampGenerationRef = useRef(0);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -463,6 +467,7 @@ export function WorkerScanClient({
           ? fieldPhotoNames
           : undefined,
       photo_proof_name: proofPhotoName,
+      ...(signatureDataUrl ? { _signature_data_url: signatureDataUrl } : {}),
     } as unknown as Json;
 
     setIsSubmitting(true);
@@ -529,6 +534,7 @@ export function WorkerScanClient({
       savedLocally,
       photoName: proofPhotoName,
       photoUrl: uploadedPhotoUrl,
+      signatureDataUrl,
       notes: trimmedNotes,
     });
   }
@@ -543,6 +549,8 @@ export function WorkerScanClient({
     setProofPhotoName(null);
     setProofPhotoFile(null);
     setProofPhotoPreview(null);
+    setSignatureDataUrl(null);
+    setSignaturePadKey((prev) => prev + 1);
     setSubmitError(null);
   }
 
@@ -684,6 +692,19 @@ export function WorkerScanClient({
                   <span className="truncate font-mono text-xs text-ink">
                     {confirmation.photoName}
                   </span>
+                </div>
+              ) : null}
+              {confirmation.signatureDataUrl ? (
+                <div className="flex items-center justify-between gap-3 pt-1">
+                  <span className="text-ink-muted">Worker Signature</span>
+                  <div className="rounded border border-border bg-white p-1">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={confirmation.signatureDataUrl}
+                      alt={`Signature of ${confirmation.inspectorName}`}
+                      className="h-10 w-28 object-contain"
+                    />
+                  </div>
                 </div>
               ) : null}
             </div>
@@ -1191,6 +1212,12 @@ export function WorkerScanClient({
                       className="mt-1.5 min-h-12 w-full rounded-lg border border-border bg-canvas px-3.5 text-sm text-ink placeholder:text-ink-muted focus:border-ink focus:outline-none"
                     />
                   </div>
+
+                  <SignaturePad
+                    key={signaturePadKey}
+                    onChange={setSignatureDataUrl}
+                    disabled={isSubmitting}
+                  />
 
                   {submitError ? (
                     <div className="flex items-start gap-2 rounded-lg border border-alert-red/30 bg-alert-red/5 p-3 text-sm text-alert-red">

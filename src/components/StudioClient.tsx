@@ -1,11 +1,15 @@
 "use client";
 
-import { useState, useSyncExternalStore, type ChangeEvent } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore, type ChangeEvent } from "react";
 import Link from "next/link";
 import {
   ArrowLeft,
   ArrowRight,
+  Calendar,
+  ClipboardList,
   Download,
+  FileText,
+  Loader2,
   Printer,
   Copy,
   Check,
@@ -17,6 +21,16 @@ import {
   MessageCircle,
 } from "lucide-react";
 import { QrCodePreview } from "@/components/QrCodePreview";
+import {
+  AUDIT_DATE_RANGE_OPTIONS,
+  exportAuditReportCsv,
+  exportAuditReportPdf,
+  extractSignatureDataUrl,
+  filterLogsByDateRange,
+  getAuditDateRangeLabel,
+  resolveLogEquipmentStatus,
+  type AuditDateRange,
+} from "@/lib/audit-report-export";
 import { isPaidPlan } from "@/lib/billing/constants";
 import {
   downloadStickerPng,
@@ -25,13 +39,14 @@ import {
 } from "@/lib/qr-export";
 import {
   getDemoQrRecord,
+  getLocalInspectionLogs,
   getLocalQrRecord,
   getQrScanUrl,
   saveLocalQrRecord,
 } from "@/lib/qr-utils";
 import { createClient } from "@/lib/supabase/client";
 import type { Json, PlanTier } from "@/types/database";
-import type { QrCodeRow } from "@/types/qr";
+import type { InspectionLogRow, QrCodeRow } from "@/types/qr";
 
 interface StudioClientProps {
   routeId: string;
@@ -67,6 +82,7 @@ const LAYOUT_PRESETS: {
 ];
 
 const subscribeNoop = () => () => {};
+const EMPTY_INSPECTION_LOGS: InspectionLogRow[] = [];
 
 function isConfigObject(
   value: unknown,
@@ -136,6 +152,93 @@ export function StudioClient({
   const [copied, setCopied] = useState(false);
   const [exporting, setExporting] = useState<"png" | "svg" | null>(null);
   const [showProPrompt, setShowProPrompt] = useState(false);
+  const [auditDateRange, setAuditDateRange] = useState<AuditDateRange>("all");
+  const [remoteAuditLogs, setRemoteAuditLogs] = useState<
+    InspectionLogRow[] | null
+  >(null);
+  const [auditLoadError, setAuditLoadError] = useState(false);
+  const [exportingAudit, setExportingAudit] = useState<"pdf" | "csv" | null>(
+    null,
+  );
+  const [auditMessage, setAuditMessage] = useState<{
+    text: string;
+    tone: "info" | "error";
+  } | null>(null);
+
+  const allLocalLogs = useSyncExternalStore(
+    subscribeNoop,
+    () =>
+      isLocalFallback && !isDemoFallback
+        ? getLocalInspectionLogs()
+        : EMPTY_INSPECTION_LOGS,
+    () => EMPTY_INSPECTION_LOGS,
+  );
+
+  const localAuditLogs = useMemo(
+    () =>
+      isLocalFallback && !isDemoFallback
+        ? allLocalLogs.filter((entry) => entry.qr_code_id === record.id)
+        : [],
+    [allLocalLogs, isLocalFallback, isDemoFallback, record.id],
+  );
+
+  useEffect(() => {
+    if (!isOwner || !supabaseConfigured) return;
+    let cancelled = false;
+
+    async function loadOwnerAuditLogs() {
+      try {
+        const supabase = createClient();
+        const { data, error } = await supabase
+          .from("inspection_logs")
+          .select("*")
+          .eq("qr_code_id", record.id)
+          .order("created_at", { ascending: false })
+          .limit(250);
+
+        if (cancelled) return;
+        if (error) {
+          setAuditLoadError(true);
+          return;
+        }
+        setRemoteAuditLogs(data ?? []);
+      } catch {
+        if (!cancelled) {
+          setAuditLoadError(true);
+        }
+      }
+    }
+
+    void loadOwnerAuditLogs();
+    return () => {
+      cancelled = true;
+    };
+  }, [isOwner, supabaseConfigured, record.id]);
+
+  const effectiveAuditLogs = useMemo(() => {
+    if (isOwner && supabaseConfigured) {
+      return remoteAuditLogs ?? [];
+    }
+    if (isLocalFallback && !isDemoFallback) {
+      return localAuditLogs;
+    }
+    return [];
+  }, [
+    isOwner,
+    supabaseConfigured,
+    remoteAuditLogs,
+    isLocalFallback,
+    isDemoFallback,
+    localAuditLogs,
+  ]);
+
+  const filteredAuditLogs = useMemo(
+    () => filterLogsByDateRange(effectiveAuditLogs, auditDateRange),
+    [effectiveAuditLogs, auditDateRange],
+  );
+
+  const isLoadingOwnerLogs =
+    isOwner && supabaseConfigured && remoteAuditLogs === null && !auditLoadError;
 
   const effectiveWatermark = isPaidUser
     ? (watermarkOverride ?? record.show_watermark)
@@ -288,6 +391,70 @@ export function StudioClient({
       );
     } finally {
       setExporting(null);
+    }
+  }
+
+  async function handleExportAudit(format: "pdf" | "csv") {
+    setAuditMessage(null);
+    setExportingAudit(format);
+
+    try {
+      let sourceLogs = effectiveAuditLogs;
+
+      if (isOwner && supabaseConfigured && remoteAuditLogs === null) {
+        const supabase = createClient();
+        const { data, error } = await supabase
+          .from("inspection_logs")
+          .select("*")
+          .eq("qr_code_id", record.id)
+          .order("created_at", { ascending: false })
+          .limit(500);
+
+        if (error) {
+          setAuditMessage({
+            text: "Could not load inspection logs. Please try again.",
+            tone: "error",
+          });
+          return;
+        }
+        sourceLogs = data ?? [];
+        setRemoteAuditLogs(sourceLogs);
+      } else if (isLocalFallback && !isDemoFallback) {
+        sourceLogs = getLocalInspectionLogs(record.id);
+      }
+
+      const filtered = filterLogsByDateRange(sourceLogs, auditDateRange);
+      const rangeOptionLabel =
+        AUDIT_DATE_RANGE_OPTIONS.find((opt) => opt.id === auditDateRange)
+          ?.label ?? "All Time";
+
+      if (filtered.length === 0) {
+        setAuditMessage({
+          text: `No inspection logs found for "${headerTitle}" (${rangeOptionLabel}).`,
+          tone: "info",
+        });
+        return;
+      }
+
+      const exportQr: QrCodeRow = {
+        ...record,
+        title: headerTitle.trim() || record.title,
+      };
+
+      if (format === "pdf") {
+        exportAuditReportPdf(exportQr, filtered, userPlan ?? "free", {
+          dateRangeLabel: getAuditDateRangeLabel(auditDateRange, filtered),
+        });
+      } else {
+        exportAuditReportCsv(exportQr, filtered);
+      }
+    } catch {
+      setAuditMessage({
+        text: `Failed to export ${format.toUpperCase()} audit report.`,
+        tone: "error",
+      });
+    } finally {
+      setExportingAudit(null);
     }
   }
 
@@ -701,6 +868,179 @@ export function StudioClient({
               <Printer className="h-4 w-4" />
               Print / Save as PDF
             </button>
+          </section>
+
+          {/* Compliance Audit Report & Inspection Logs */}
+          <section className="rounded-xl border border-border bg-surface p-5 space-y-3.5">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <ClipboardList className="h-4 w-4 text-utility-blue" />
+                <h2 className="text-sm font-semibold text-ink">
+                  Audit Report &amp; Logs
+                </h2>
+              </div>
+              {canPersistAlertSettings ? (
+                <span className="font-mono text-[11px] text-ink-muted">
+                  {isLoadingOwnerLogs
+                    ? "Loading..."
+                    : `${filteredAuditLogs.length} ${
+                        filteredAuditLogs.length === 1 ? "log" : "logs"
+                      }`}
+                </span>
+              ) : null}
+            </div>
+
+            {!canPersistAlertSettings ? (
+              <p className="rounded-lg border border-border bg-canvas px-3 py-2.5 text-xs text-ink-muted">
+                Sign in as the QR owner to view private frontline inspection logs
+                and download FSSAI / ISO compliance audit reports.
+              </p>
+            ) : (
+              <>
+                <div className="space-y-1.5">
+                  <span className="inline-flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wide text-ink-muted">
+                    <Calendar className="h-3.5 w-3.5 text-utility-blue" />
+                    Date Range
+                  </span>
+                  <div
+                    role="group"
+                    aria-label="Studio audit report date range"
+                    className="grid grid-cols-3 gap-1.5"
+                  >
+                    {AUDIT_DATE_RANGE_OPTIONS.map((option) => {
+                      const active = auditDateRange === option.id;
+                      return (
+                        <button
+                          key={option.id}
+                          type="button"
+                          onClick={() => {
+                            setAuditDateRange(option.id);
+                            setAuditMessage(null);
+                          }}
+                          aria-pressed={active}
+                          className={`rounded-lg border px-2 py-2 text-xs font-medium transition-colors ${
+                            active
+                              ? "border-ink bg-ink text-white"
+                              : "border-border bg-canvas text-ink-muted hover:bg-canvas-muted hover:text-ink"
+                          }`}
+                        >
+                          {option.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2.5">
+                  <button
+                    type="button"
+                    disabled={exportingAudit !== null}
+                    onClick={() => handleExportAudit("pdf")}
+                    className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-lg border border-border bg-surface px-3 text-xs font-semibold text-ink transition-colors hover:bg-canvas-muted disabled:opacity-60"
+                  >
+                    {exportingAudit === "pdf" ? (
+                      <Loader2 className="h-4 w-4 animate-spin text-utility-blue" />
+                    ) : (
+                      <FileText className="h-4 w-4 text-utility-blue" />
+                    )}
+                    <span>
+                      {exportingAudit === "pdf"
+                        ? "Generating..."
+                        : "Export Audit PDF"}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    disabled={exportingAudit !== null}
+                    onClick={() => handleExportAudit("csv")}
+                    className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-lg border border-border bg-surface px-3 text-xs font-semibold text-ink transition-colors hover:bg-canvas-muted disabled:opacity-60"
+                  >
+                    {exportingAudit === "csv" ? (
+                      <Loader2 className="h-4 w-4 animate-spin text-action-green" />
+                    ) : (
+                      <Download className="h-4 w-4 text-action-green" />
+                    )}
+                    <span>
+                      {exportingAudit === "csv" ? "Exporting..." : "Export CSV"}
+                    </span>
+                  </button>
+                </div>
+
+                {auditMessage ? (
+                  <div
+                    role="status"
+                    className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-xs ${
+                      auditMessage.tone === "error"
+                        ? "border-alert-red/30 bg-alert-red/5 text-alert-red"
+                        : "border-border bg-canvas text-ink-muted"
+                    }`}
+                  >
+                    <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                    <span>{auditMessage.text}</span>
+                  </div>
+                ) : null}
+
+                {filteredAuditLogs.length > 0 ? (
+                  <div className="space-y-2 border-t border-border pt-3">
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-ink-muted">
+                      Recent Inspections
+                    </p>
+                    <div className="max-h-72 space-y-2 overflow-y-auto pr-0.5">
+                      {filteredAuditLogs.slice(0, 5).map((log) => {
+                        const eqStatus = resolveLogEquipmentStatus(log);
+                        const sigUrl = extractSignatureDataUrl(
+                          log.step_results,
+                        );
+                        return (
+                          <div
+                            key={log.id}
+                            className="rounded-lg border border-border bg-canvas p-2.5 text-xs"
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="font-semibold text-ink">
+                                {log.inspector_name}
+                              </span>
+                              <span
+                                className={`rounded border px-1.5 py-0.5 font-mono text-[10px] font-bold uppercase ${
+                                  eqStatus === "faulty"
+                                    ? "border-alert-red/30 bg-alert-red/10 text-alert-red"
+                                    : eqStatus === "maintenance"
+                                      ? "border-amber-500/30 bg-amber-500/10 text-amber-700"
+                                      : "border-action-green/30 bg-action-green/10 text-action-green"
+                                }`}
+                              >
+                                {eqStatus}
+                              </span>
+                            </div>
+                            <p className="mt-0.5 font-mono text-[10px] text-ink-muted">
+                              {new Date(log.created_at).toLocaleString()}
+                            </p>
+                            {log.notes ? (
+                              <p className="mt-1 text-xs text-ink-muted">
+                                {log.notes}
+                              </p>
+                            ) : null}
+                            {sigUrl ? (
+                              <div className="mt-2 flex items-center justify-between gap-2 border-t border-border/70 pt-1.5">
+                                <span className="text-[10px] font-medium uppercase tracking-wide text-ink-muted">
+                                  Signature
+                                </span>
+                                {/* eslint-disable-next-line @next/next/no-img-element */}
+                                <img
+                                  src={sigUrl}
+                                  alt={`Signature of ${log.inspector_name}`}
+                                  className="h-7 w-24 rounded border border-border bg-white object-contain p-0.5"
+                                />
+                              </div>
+                            ) : null}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ) : null}
+              </>
+            )}
           </section>
         </aside>
 

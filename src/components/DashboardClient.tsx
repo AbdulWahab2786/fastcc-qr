@@ -6,12 +6,14 @@ import { useRouter } from "next/navigation";
 import {
   AlertCircle,
   ArrowRight,
+  Calendar,
   Check,
   CheckCircle2,
   ClipboardCheck,
   Copy,
   Download,
   ExternalLink,
+  FileText,
   Flame,
   Loader2,
   Lock,
@@ -23,9 +25,19 @@ import {
   Trash2,
   Truck,
   Utensils,
+  X,
   Zap,
 } from "lucide-react";
 import { BulkPrintModal } from "@/components/BulkPrintModal";
+import {
+  AUDIT_DATE_RANGE_OPTIONS,
+  exportAuditReportCsv,
+  exportAuditReportPdf,
+  extractSignatureDataUrl,
+  filterLogsByDateRange,
+  getAuditDateRangeLabel,
+  type AuditDateRange,
+} from "@/lib/audit-report-export";
 import {
   FREE_QR_LIMIT,
   getAiSopLimit,
@@ -185,7 +197,22 @@ export function DashboardClient({
   const [templateUpgradePrompt, setTemplateUpgradePrompt] = useState<
     string | null
   >(null);
+  const [auditDateRange, setAuditDateRange] = useState<AuditDateRange>("all");
+  const [exportingAuditKey, setExportingAuditKey] = useState<string | null>(
+    null,
+  );
+  const [auditToast, setAuditToast] = useState<{
+    message: string;
+    tone: "info" | "error";
+  } | null>(null);
+  const [previewSignature, setPreviewSignature] = useState<{
+    url: string;
+    workerName: string;
+    submittedAt: string;
+  } | null>(null);
   const selectAllCheckboxRef = useRef<HTMLInputElement>(null);
+  const fetchedLogsByQrRef = useRef<Map<string, InspectionLogRow[]>>(new Map());
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const isPaid = isPaidPlan(plan);
   const planSpec = PLAN_SPECS[plan];
@@ -353,6 +380,7 @@ export function DashboardClient({
 
       setQrCodes((prev) => prev.filter((item) => item.id !== qr.id));
       setLogs((prev) => prev.filter((log) => log.qr_code_id !== qr.id));
+      fetchedLogsByQrRef.current.delete(qr.id);
       setSelectedIds((prev) => {
         if (!prev.has(qr.id)) return prev;
         const next = new Set(prev);
@@ -364,6 +392,87 @@ export function DashboardClient({
       setErrorBanner(`Unexpected error deleting "${qr.title}".`);
     } finally {
       setDeletingId(null);
+    }
+  }
+
+  useEffect(() => {
+    return () => {
+      if (toastTimerRef.current) {
+        clearTimeout(toastTimerRef.current);
+      }
+    };
+  }, []);
+
+  function showAuditToast(
+    message: string,
+    tone: "info" | "error" = "info",
+  ) {
+    setAuditToast({ message, tone });
+    if (toastTimerRef.current) {
+      clearTimeout(toastTimerRef.current);
+    }
+    toastTimerRef.current = setTimeout(() => {
+      setAuditToast(null);
+    }, 4500);
+  }
+
+  async function fetchLogsForQr(qrId: string): Promise<InspectionLogRow[]> {
+    const cached = fetchedLogsByQrRef.current.get(qrId);
+    if (cached) return cached;
+
+    try {
+      const supabase = createClient();
+      const { data, error } = await supabase
+        .from("inspection_logs")
+        .select("*")
+        .eq("qr_code_id", qrId)
+        .order("created_at", { ascending: true });
+
+      if (!error && data) {
+        fetchedLogsByQrRef.current.set(qrId, data);
+        return data;
+      }
+    } catch {
+      // Fall back to already-loaded dashboard logs below.
+    }
+
+    return logs.filter((log) => log.qr_code_id === qrId);
+  }
+
+  async function handleAuditExport(qr: QrCodeRow, format: "pdf" | "csv") {
+    const key = `${qr.id}:${format}`;
+    setExportingAuditKey(key);
+    setAuditToast(null);
+
+    try {
+      const allQrLogs = await fetchLogsForQr(qr.id);
+      const filtered = filterLogsByDateRange(allQrLogs, auditDateRange);
+      const rangeOptionLabel =
+        AUDIT_DATE_RANGE_OPTIONS.find((opt) => opt.id === auditDateRange)
+          ?.label ?? "All Time";
+
+      if (filtered.length === 0) {
+        showAuditToast(
+          `No inspection logs found for "${qr.title}" (${rangeOptionLabel}).`,
+          "info",
+        );
+        return;
+      }
+
+      if (format === "pdf") {
+        exportAuditReportPdf(qr, filtered, plan, {
+          dateRangeLabel: getAuditDateRangeLabel(auditDateRange, filtered),
+        });
+      } else {
+        exportAuditReportCsv(qr, filtered);
+      }
+    } catch {
+      showAuditToast(
+        `Could not export ${format.toUpperCase()} audit report for "${qr.title}".`,
+        "error",
+      );
+    } finally {
+      setExportingAuditKey(null);
     }
   }
 
@@ -595,49 +704,80 @@ export function DashboardClient({
           </div>
 
           {qrCodes.length > 0 ? (
-            <div
-              role="group"
-              aria-label="Filter QR codes by equipment status"
-              className="flex flex-wrap items-center gap-1.5"
-            >
-              {(
-                [
-                  { id: "all", label: "All" },
-                  { id: "faulty", label: "Faulty" },
-                  { id: "maintenance", label: "Maintenance" },
-                  { id: "ok", label: "OK" },
-                ] as const
-              ).map((pill) => {
-                const active = statusFilter === pill.id;
-                const count = statusCounts[pill.id];
-                const activeClasses =
-                  pill.id === "faulty"
-                    ? "border-alert-red bg-alert-red text-white"
-                    : pill.id === "maintenance"
-                      ? "border-amber-500 bg-amber-500 text-white"
-                      : pill.id === "ok"
-                        ? "border-action-green bg-action-green text-white"
-                        : "border-ink bg-ink text-white";
+            <div className="flex flex-wrap items-center gap-3">
+              <div
+                role="group"
+                aria-label="Audit report date range"
+                className="flex items-center gap-1 rounded-lg border border-border bg-surface p-1"
+              >
+                <span className="inline-flex items-center gap-1 px-2 text-[11px] font-semibold uppercase tracking-wide text-ink-muted">
+                  <Calendar className="h-3.5 w-3.5 text-utility-blue" />
+                  Audit Range:
+                </span>
+                {AUDIT_DATE_RANGE_OPTIONS.map((option) => {
+                  const active = auditDateRange === option.id;
+                  return (
+                    <button
+                      key={option.id}
+                      type="button"
+                      onClick={() => setAuditDateRange(option.id)}
+                      aria-pressed={active}
+                      className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
+                        active
+                          ? "bg-ink text-white"
+                          : "text-ink-muted hover:bg-canvas-muted hover:text-ink"
+                      }`}
+                    >
+                      {option.label}
+                    </button>
+                  );
+                })}
+              </div>
 
-                return (
-                  <button
-                    key={pill.id}
-                    type="button"
-                    onClick={() => setStatusFilter(pill.id)}
-                    aria-pressed={active}
-                    className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
-                      active
-                        ? activeClasses
-                        : "border-border bg-surface text-ink-muted hover:bg-canvas-muted hover:text-ink"
-                    }`}
-                  >
-                    <span>{pill.label}</span>
-                    <span className="font-mono text-[11px] opacity-80">
-                      {count}
-                    </span>
-                  </button>
-                );
-              })}
+              <div
+                role="group"
+                aria-label="Filter QR codes by equipment status"
+                className="flex flex-wrap items-center gap-1.5"
+              >
+                {(
+                  [
+                    { id: "all", label: "All" },
+                    { id: "faulty", label: "Faulty" },
+                    { id: "maintenance", label: "Maintenance" },
+                    { id: "ok", label: "OK" },
+                  ] as const
+                ).map((pill) => {
+                  const active = statusFilter === pill.id;
+                  const count = statusCounts[pill.id];
+                  const activeClasses =
+                    pill.id === "faulty"
+                      ? "border-alert-red bg-alert-red text-white"
+                      : pill.id === "maintenance"
+                        ? "border-amber-500 bg-amber-500 text-white"
+                        : pill.id === "ok"
+                          ? "border-action-green bg-action-green text-white"
+                          : "border-ink bg-ink text-white";
+
+                  return (
+                    <button
+                      key={pill.id}
+                      type="button"
+                      onClick={() => setStatusFilter(pill.id)}
+                      aria-pressed={active}
+                      className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+                        active
+                          ? activeClasses
+                          : "border-border bg-surface text-ink-muted hover:bg-canvas-muted hover:text-ink"
+                      }`}
+                    >
+                      <span>{pill.label}</span>
+                      <span className="font-mono text-[11px] opacity-80">
+                        {count}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           ) : null}
         </div>
@@ -822,8 +962,34 @@ export function DashboardClient({
                         <td className="px-4 py-3.5 whitespace-nowrap text-xs text-ink-muted">
                           {formatDate(qr.created_at)}
                         </td>
-                        <td className="px-4 py-3.5 whitespace-nowrap">
-                          <div className="flex items-center justify-end gap-1.5">
+                        <td className="px-4 py-3.5">
+                          <div className="ml-auto flex max-w-[360px] flex-wrap items-center justify-end gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => handleAuditExport(qr, "pdf")}
+                              disabled={exportingAuditKey !== null}
+                              className="inline-flex items-center gap-1 rounded-md border border-border bg-surface px-2.5 py-1.5 text-xs font-medium text-ink transition-colors hover:bg-canvas-muted disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              {exportingAuditKey === `${qr.id}:pdf` ? (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin text-utility-blue" />
+                              ) : (
+                                <FileText className="h-3.5 w-3.5 text-utility-blue" />
+                              )}
+                              <span>Export Audit PDF</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleAuditExport(qr, "csv")}
+                              disabled={exportingAuditKey !== null}
+                              className="inline-flex items-center gap-1 rounded-md border border-border bg-surface px-2.5 py-1.5 text-xs font-medium text-ink transition-colors hover:bg-canvas-muted disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              {exportingAuditKey === `${qr.id}:csv` ? (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin text-action-green" />
+                              ) : (
+                                <Download className="h-3.5 w-3.5 text-action-green" />
+                              )}
+                              <span>Export CSV</span>
+                            </button>
                             <Link
                               href={`/studio/${qr.short_code}`}
                               className="inline-flex items-center gap-1 rounded-md border border-border bg-surface px-2.5 py-1.5 text-xs font-medium text-ink transition-colors hover:bg-canvas-muted"
@@ -1020,12 +1186,16 @@ export function DashboardClient({
                     <th className="px-4 py-3">Worker Name</th>
                     <th className="px-4 py-3">QR Title</th>
                     <th className="px-4 py-3">Notes / Status</th>
+                    <th className="px-4 py-3">Signature</th>
                     <th className="px-4 py-3">Submitted At</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
                   {logs.map((log) => {
                     const qr = qrLookup.get(log.qr_code_id);
+                    const signatureUrl = extractSignatureDataUrl(
+                      log.step_results,
+                    );
                     return (
                       <tr
                         key={log.id}
@@ -1075,6 +1245,33 @@ export function DashboardClient({
                               </a>
                             ) : null}
                           </div>
+                        </td>
+                        <td className="px-4 py-3.5 whitespace-nowrap">
+                          {signatureUrl ? (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setPreviewSignature({
+                                  url: signatureUrl,
+                                  workerName: log.inspector_name,
+                                  submittedAt: formatDateTime(log.created_at),
+                                })
+                              }
+                              title="Click to enlarge worker signature"
+                              className="inline-flex items-center rounded border border-border bg-white p-0.5 transition-colors hover:border-utility-blue"
+                            >
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img
+                                src={signatureUrl}
+                                alt={`Signature of ${log.inspector_name}`}
+                                className="h-7 w-20 object-contain"
+                              />
+                            </button>
+                          ) : (
+                            <span className="font-mono text-xs text-ink-muted/60">
+                              —
+                            </span>
+                          )}
                         </td>
                         <td className="px-4 py-3.5 whitespace-nowrap font-mono text-xs text-ink-muted">
                           {formatDateTime(log.created_at)}
@@ -1127,6 +1324,77 @@ export function DashboardClient({
         selectedQrs={selectedQrs}
         plan={plan}
       />
+
+      {auditToast ? (
+        <div
+          role="status"
+          aria-live="polite"
+          className={`fixed right-4 bottom-4 z-50 flex max-w-md items-center gap-3 rounded-xl border px-4 py-3 text-xs font-medium shadow-lg ${
+            auditToast.tone === "error"
+              ? "border-alert-red/40 bg-surface text-alert-red"
+              : "border-border bg-surface text-ink"
+          }`}
+        >
+          <AlertCircle
+            className={`h-4 w-4 shrink-0 ${
+              auditToast.tone === "error"
+                ? "text-alert-red"
+                : "text-utility-blue"
+            }`}
+          />
+          <span>{auditToast.message}</span>
+          <button
+            type="button"
+            onClick={() => setAuditToast(null)}
+            aria-label="Dismiss notification"
+            className="rounded p-1 text-ink-muted transition-colors hover:bg-canvas-muted hover:text-ink"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      ) : null}
+
+      {previewSignature ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Worker signature preview"
+          onClick={() => setPreviewSignature(null)}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-ink/50 p-4 backdrop-blur-[1px]"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-md rounded-xl border border-border bg-surface p-5 shadow-xl"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-semibold text-ink">
+                  Worker Digital Signature
+                </h3>
+                <p className="mt-0.5 text-xs text-ink-muted">
+                  {previewSignature.workerName} • {previewSignature.submittedAt}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPreviewSignature(null)}
+                aria-label="Close signature preview"
+                className="rounded-md p-1 text-ink-muted transition-colors hover:bg-canvas-muted hover:text-ink"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="mt-4 flex items-center justify-center rounded-lg border border-border bg-white p-4">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={previewSignature.url}
+                alt={`Digital signature of ${previewSignature.workerName}`}
+                className="max-h-44 w-full object-contain"
+              />
+            </div>
+          </div>
+        </div>
+      ) : null}
     </main>
   );
 }

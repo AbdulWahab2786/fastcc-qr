@@ -6,7 +6,7 @@ import {
 import { createClient } from "@/lib/supabase/client";
 import { hasSupabaseEnv } from "@/lib/supabase/env";
 import type { Json } from "@/types/database";
-import type { InspectionLogInsert, QrCodeRow, SopStepRow } from "@/types/qr";
+import type { InspectionLogInsert, InspectionLogRow, QrCodeRow, SopStepRow } from "@/types/qr";
 
 const SHORT_CODE_ALPHABET =
   "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789";
@@ -206,6 +206,43 @@ export function saveLocalInspectionLog(
     // Ignore storage quota or privacy-mode errors.
   }
   return saved;
+}
+
+let cachedLogsRaw: string | null = null;
+let cachedLogsList: InspectionLogRow[] = [];
+const EMPTY_LOGS: InspectionLogRow[] = [];
+
+export function getLocalInspectionLogs(qrCodeId?: string): InspectionLogRow[] {
+  if (typeof window === "undefined") return EMPTY_LOGS;
+  try {
+    const raw = window.localStorage.getItem(LOCAL_LOGS_STORAGE_KEY);
+    if (!raw) {
+      cachedLogsRaw = null;
+      cachedLogsList = EMPTY_LOGS;
+      return EMPTY_LOGS;
+    }
+    if (raw !== cachedLogsRaw) {
+      const entries = JSON.parse(raw) as LocalInspectionLogEntry[];
+      cachedLogsRaw = raw;
+      cachedLogsList = Array.isArray(entries)
+        ? entries.map((entry) => ({
+            id: entry.id,
+            qr_code_id: entry.qr_code_id,
+            inspector_name: entry.inspector_name,
+            status: entry.status,
+            equipment_status: entry.equipment_status ?? "ok",
+            notes: entry.notes ?? null,
+            photo_url: entry.photo_url ?? null,
+            step_results: entry.step_results ?? [],
+            created_at: entry.created_at,
+          }))
+        : EMPTY_LOGS;
+    }
+    if (!qrCodeId) return cachedLogsList;
+    return cachedLogsList.filter((entry) => entry.qr_code_id === qrCodeId);
+  } catch {
+    return EMPTY_LOGS;
+  }
 }
 
 export interface CreateGuestSopStepInput {
