@@ -24,7 +24,7 @@ export default function HomePage({ searchParams }: HomePageProps) {
     <main>
       <Suspense
         fallback={
-          <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6 sm:py-10">
+          <div className="mx-auto max-w-6xl px-4 py-10 sm:px-6 sm:py-14">
             <div className="h-96 animate-pulse rounded-xl border border-border bg-surface" />
           </div>
         }

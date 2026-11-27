@@ -590,7 +590,7 @@ export function HomeWorkbench({ initialTemplateId }: HomeWorkbenchProps) {
   ];
 
   return (
-    <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6 sm:py-10">
+    <div className="mx-auto max-w-6xl px-4 py-10 sm:px-6 sm:py-14">
       {/* Subtle Local Fallback Banner */}
       {bannerNotice ? (
         <div className="mb-5 flex items-center gap-2.5 rounded-lg border border-border bg-surface px-4 py-2.5 text-xs text-ink-muted">
@@ -621,51 +621,20 @@ export function HomeWorkbench({ initialTemplateId }: HomeWorkbenchProps) {
 
       {/* Hero 2-Column CaoLiao-Style Workbench */}
       <section id="workbench-top" aria-label="Instant QR Workbench">
-        <div className="mb-5 flex flex-col justify-between gap-3 sm:flex-row sm:items-end">
-          <div className="max-w-3xl">
-            <div className="mb-2 flex flex-wrap items-center gap-2">
-              <span className="inline-flex items-center rounded-md border border-action-green/30 bg-action-green/10 px-2.5 py-0.5 font-mono text-[11px] font-semibold uppercase tracking-wide text-action-green">
-                Industrial QR SOP, Audit &amp; Inspection Platform
-              </span>
-              <span className="inline-flex items-center rounded-md border border-border bg-surface px-2.5 py-0.5 font-mono text-[11px] font-medium text-ink-muted">
-                Zero Worker Login • 10-Second Setup
-              </span>
-            </div>
-            <h1 className="text-2xl font-semibold tracking-tight text-ink sm:text-3xl">
-              QR SOPs &amp; Live-Photo Audits for Indian Factories, Cloud Kitchens &amp; Warehouses
-            </h1>
-            <p className="mt-1.5 text-sm text-ink-muted">
-              Generate permanent machine QR stickers in seconds. Workers scan
-              with no app or login in 5 Indian languages, capture GPS-stamped
-              live photos, and managers export 1-click FSSAI / ISO audit PDFs.
-            </p>
-            <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px] font-medium text-ink">
-              <span className="inline-flex items-center gap-1 rounded border border-border bg-surface px-2 py-0.5">
-                <CheckCircle2 className="h-3 w-3 text-action-green" />
-                Live GPS Photo Proof
-              </span>
-              <span className="inline-flex items-center gap-1 rounded border border-border bg-surface px-2 py-0.5">
-                <CheckCircle2 className="h-3 w-3 text-action-green" />
-                EN • हिन्दी • తెలుగు • मराठी • தமிழ்
-              </span>
-              <span className="inline-flex items-center gap-1 rounded border border-border bg-surface px-2 py-0.5">
-                <CheckCircle2 className="h-3 w-3 text-action-green" />
-                WhatsApp Faulty Alerts
-              </span>
-              <span className="inline-flex items-center gap-1 rounded border border-border bg-surface px-2 py-0.5">
-                <CheckCircle2 className="h-3 w-3 text-action-green" />
-                A4 Sticker &amp; Audit PDF Export
-              </span>
-            </div>
-          </div>
-          <span className="inline-flex w-fit shrink-0 items-center gap-1.5 rounded-md border border-border bg-surface px-2.5 py-1 font-mono text-xs text-ink-muted">
-            ECC Level H • Permanent ID
-          </span>
+        <div className="mx-auto mb-8 max-w-3xl text-center sm:mb-10">
+          <h1 className="text-3xl font-semibold tracking-tight text-ink sm:text-4xl">
+            QR SOPs &amp; Live-Photo Audits for Indian Shop Floors
+          </h1>
+          <p className="mt-3 text-base text-ink-muted sm:text-lg">
+            Create permanent machine QR codes in seconds. Workers scan with zero
+            app or login, capture GPS-stamped photos, and you export 1-click
+            audit PDFs.
+          </p>
         </div>
 
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
           {/* Left Column: Industry Template Picker + Tabbed Input */}
-          <div className="rounded-xl border border-border bg-surface lg:col-span-7">
+          <div className="rounded-xl border border-border bg-surface shadow-[0_1px_2px_rgba(15,23,42,0.03)] lg:col-span-7">
             {/* Start from Industry Template Picker */}
             <div className="border-b border-border bg-canvas/70 px-4 py-3.5 sm:px-6">
               <div className="flex flex-wrap items-center justify-between gap-2">
@@ -1307,7 +1276,7 @@ export function HomeWorkbench({ initialTemplateId }: HomeWorkbenchProps) {
           </div>
 
           {/* Right Column: Live QR Preview */}
-          <div className="flex flex-col justify-between rounded-xl border border-border bg-surface p-5 sm:p-6 lg:col-span-5">
+          <div className="flex flex-col justify-between rounded-xl border border-border bg-surface p-6 shadow-[0_1px_2px_rgba(15,23,42,0.03)] lg:col-span-5">
             <div>
               <div className="flex items-center justify-between gap-2">
                 <span className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-ink-muted">
@@ -1380,15 +1349,15 @@ export function HomeWorkbench({ initialTemplateId }: HomeWorkbenchProps) {
       </section>
 
       {/* 1-Click Industry Template Gallery (Below the Fold) */}
-      <section id="templates" className="mt-12 border-t border-border pt-10">
-        <div className="mb-5 flex flex-col justify-between gap-2 sm:flex-row sm:items-end">
+      <section id="templates" className="mt-16 border-t border-border pt-14 sm:mt-20 sm:pt-16">
+        <div className="mb-8 flex flex-col justify-between gap-2 sm:flex-row sm:items-end">
           <div>
-            <h2 className="text-lg font-semibold text-ink sm:text-xl">
+            <h2 className="text-xl font-semibold tracking-tight text-ink sm:text-2xl">
               1-Click Industry SOP Templates
             </h2>
-            <p className="mt-1 text-sm text-ink-muted">
-              Pre-built Indian B2B &amp; compliance checklists. Populate the
-              workbench in one click and generate a live QR in under 10 seconds.
+            <p className="mt-1.5 text-sm text-ink-muted">
+              Load a pre-built Indian compliance checklist and generate a live QR
+              in seconds.
             </p>
           </div>
         </div>

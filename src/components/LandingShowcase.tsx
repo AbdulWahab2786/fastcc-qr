@@ -9,6 +9,7 @@ import {
   Printer,
   ShieldCheck,
 } from "lucide-react";
+import { SavingsComparison } from "@/components/SavingsComparison";
 import { FREE_QR_LIMIT } from "@/lib/billing/constants";
 
 interface FeatureItem {
@@ -23,42 +24,42 @@ const KILLER_FEATURES: FeatureItem[] = [
     title: "Anti-Fake Live Photo Proof",
     badge: "CAMERA + GPS",
     description:
-      "Enforces live mobile camera capture only—blocking old gallery uploads—and burns Date, Time, and GPS coordinates directly onto every inspection photo.",
+      "Blocks gallery uploads and stamps date, time, and GPS onto every live inspection photo.",
     icon: Camera,
   },
   {
     title: "1-Click FSSAI / ISO Audit Reports",
     badge: "PDF & CSV",
     description:
-      "Export chronological inspection PDFs and CSV logs complete with compliance KPIs, photo evidence links, equipment status, and worker digital signatures.",
+      "Export chronological inspection PDFs and CSV logs with photo evidence and worker signatures.",
     icon: FileCheck2,
   },
   {
     title: "5-Language Shop-Floor View",
     badge: "1-TAP SWITCH",
     description:
-      "Managers author SOPs once in English; frontline operators switch to हिन्दी, తెలుగు, मराठी, or தமிழ் in a single tap—zero extra setup.",
+      "Author SOPs once in English; workers switch to हिन्दी, తెలుగు, मराठी, or தமிழ் in one tap.",
     icon: Languages,
   },
   {
     title: "Live Status & Overdue Alerts",
     badge: "WHATSAPP ALERTS",
     description:
-      "Real-time OK, Maintenance, and Faulty machine badges with Daily, Weekly, or Monthly schedules, overdue flags, and 1-tap WhatsApp Faulty Alerts.",
+      "Real-time OK, Maintenance, and Faulty badges with schedules and 1-tap WhatsApp alerts.",
     icon: Activity,
   },
   {
     title: "A4 Bulk Sticker Print Sheet",
     badge: "8 / 12 / 16 PER PAGE",
     description:
-      "Select QR labels by site or folder and download print-ready A4 PDFs with 8, 12, or 16 stickers per sheet, cut-lines, and custom footer tags.",
+      "Download print-ready A4 PDF sticker sheets with cut-lines, grouped by site or folder.",
     icon: Printer,
   },
   {
     title: "CSV Bulk Upload & Site Folders",
     badge: "50–100+ ASSETS",
     description:
-      "Import 50–100 equipment checklists in seconds from Excel or CSV, auto-wire SOP steps and WhatsApp numbers, and group assets by floor, kitchen, or branch.",
+      "Import 50–100 equipment checklists from Excel or CSV and organize by floor or branch.",
     icon: FileSpreadsheet,
   },
 ];
@@ -68,52 +69,57 @@ const HOW_IT_WORKS_STEPS = [
     step: "01",
     title: "Pick Template or Upload CSV",
     description:
-      "Start with a 1-click FSSAI, DG set, or forklift template above, digitize a 60s video or paper register with AI, or bulk-upload 50–100 assets via CSV.",
+      "Start with a 1-click template, digitize a video or paper log with AI, or bulk-import via CSV.",
   },
   {
     step: "02",
-    title: "Print A4 Stickers & Paste on Machines",
+    title: "Print A4 Stickers & Paste",
     description:
-      "Download cut-ready A4 sticker sheets (8, 12, or 16 stickers per page) or single equipment plates and paste them directly onto machines and stations.",
+      "Download cut-ready A4 sticker sheets (8, 12, or 16 per page) and stick them on machines.",
   },
   {
     step: "03",
-    title: "Workers Scan (No App/Login) & Managers Export Audit PDFs",
+    title: "Scan (No App) & Export PDFs",
     description:
-      "Staff scan with any phone camera, switch to their language, snap live GPS-stamped photo proof & sign; managers monitor status and export audit PDFs.",
+      "Workers scan, switch language, and snap GPS photo proof; managers export audit PDFs.",
   },
 ] as const;
 
 export function LandingShowcase() {
   return (
-    <div className="mx-auto max-w-6xl space-y-12 px-4 pb-14 sm:px-6">
+    <div className="mx-auto max-w-6xl px-4 pb-20 sm:px-6">
+      {/* Mailcheap-Style Competitor Savings Comparison */}
+      <SavingsComparison />
+
       {/* 6-Card Killer Feature Grid */}
-      <section aria-labelledby="features-heading" className="border-t border-border pt-10">
-        <div className="mb-6 flex flex-col justify-between gap-2 sm:flex-row sm:items-end">
-          <div>
+      <section
+        aria-labelledby="features-heading"
+        className="border-t border-border py-16 sm:py-20"
+      >
+        <div className="mb-10 flex flex-col justify-between gap-3 sm:flex-row sm:items-end">
+          <div className="max-w-2xl">
             <span className="font-mono text-[11px] font-semibold uppercase tracking-wider text-action-green">
               Built for Shop-Floor Accountability
             </span>
             <h2
               id="features-heading"
-              className="mt-1 text-xl font-semibold tracking-tight text-ink sm:text-2xl"
+              className="mt-1.5 text-2xl font-semibold tracking-tight text-ink sm:text-3xl"
             >
-              Everything Indian Operations Teams Need to Replace Paper Logs
+              Everything Operations Teams Need to Replace Paper Logs
             </h2>
           </div>
-          <p className="max-w-md text-xs leading-relaxed text-ink-muted sm:text-sm">
-            Engineered for factories, cloud kitchens, and warehouses—zero app
-            installs for workers, audit-grade records for managers.
+          <p className="max-w-sm text-sm text-ink-muted">
+            Zero app installs for workers. Audit-grade records for managers.
           </p>
         </div>
 
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
           {KILLER_FEATURES.map((feature) => {
             const Icon = feature.icon;
             return (
               <article
                 key={feature.title}
-                className="flex flex-col justify-between rounded-xl border border-border bg-surface p-5"
+                className="flex flex-col justify-between rounded-xl border border-border bg-surface p-6"
               >
                 <div>
                   <div className="flex items-center justify-between gap-2">
@@ -127,7 +133,7 @@ export function LandingShowcase() {
                   <h3 className="mt-4 text-base font-semibold text-ink">
                     {feature.title}
                   </h3>
-                  <p className="mt-1.5 text-xs leading-relaxed text-ink-muted sm:text-sm">
+                  <p className="mt-1.5 text-sm leading-relaxed text-ink-muted">
                     {feature.description}
                   </p>
                 </div>
@@ -140,18 +146,18 @@ export function LandingShowcase() {
       {/* 3-Step How It Works Strip */}
       <section
         aria-labelledby="how-it-works-heading"
-        className="rounded-xl border border-border bg-surface p-6 sm:p-8"
+        className="border-t border-border py-16 sm:py-20"
       >
-        <div className="mb-6 flex flex-col justify-between gap-2 sm:flex-row sm:items-end">
+        <div className="mb-10 flex flex-col justify-between gap-3 sm:flex-row sm:items-end">
           <div>
             <span className="font-mono text-[11px] font-semibold uppercase tracking-wider text-utility-blue">
               How It Works
             </span>
             <h2
               id="how-it-works-heading"
-              className="mt-1 text-xl font-semibold tracking-tight text-ink"
+              className="mt-1.5 text-2xl font-semibold tracking-tight text-ink sm:text-3xl"
             >
-              From Spreadsheet or Template to Live Audit Trail in 3 Steps
+              From Spreadsheet to Live Audit Trail in 3 Steps
             </h2>
           </div>
           <span className="font-mono text-xs text-ink-muted">
@@ -159,19 +165,21 @@ export function LandingShowcase() {
           </span>
         </div>
 
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+        <div className="grid grid-cols-1 gap-5 md:grid-cols-3">
           {HOW_IT_WORKS_STEPS.map((item) => (
             <div
               key={item.step}
-              className="rounded-lg border border-border bg-canvas p-4 sm:p-5"
+              className="rounded-xl border border-border bg-surface p-6"
             >
-              <div className="flex items-center gap-2.5">
+              <div className="flex items-center gap-3">
                 <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-ink font-mono text-xs font-semibold text-surface">
                   {item.step}
                 </span>
-                <h3 className="text-sm font-semibold text-ink">{item.title}</h3>
+                <h3 className="text-base font-semibold text-ink">
+                  {item.title}
+                </h3>
               </div>
-              <p className="mt-2.5 text-xs leading-relaxed text-ink-muted sm:text-sm">
+              <p className="mt-3 text-sm leading-relaxed text-ink-muted">
                 {item.description}
               </p>
             </div>
@@ -182,7 +190,7 @@ export function LandingShowcase() {
       {/* Bottom B2B CTA Banner */}
       <section
         aria-labelledby="bottom-cta-heading"
-        className="flex flex-col justify-between gap-6 rounded-xl border border-border bg-surface p-6 sm:p-8 lg:flex-row lg:items-center"
+        className="flex flex-col justify-between gap-6 rounded-xl border border-border bg-surface p-6 sm:p-10 lg:flex-row lg:items-center"
       >
         <div className="max-w-2xl">
           <div className="inline-flex items-center gap-1.5 rounded border border-action-green/30 bg-action-green/10 px-2.5 py-0.5 font-mono text-[11px] font-semibold uppercase text-action-green">
@@ -191,13 +199,13 @@ export function LandingShowcase() {
           </div>
           <h2
             id="bottom-cta-heading"
-            className="mt-3 text-xl font-semibold tracking-tight text-ink sm:text-2xl"
+            className="mt-3 text-2xl font-semibold tracking-tight text-ink"
           >
-            Put Every Machine, Kitchen Station &amp; Warehouse Asset Under Live QR Control
+            Put Every Machine, Kitchen &amp; Warehouse Under Live QR Control
           </h2>
-          <p className="mt-1.5 text-sm text-ink-muted">
+          <p className="mt-2 text-sm text-ink-muted">
             Start free with up to {FREE_QR_LIMIT} permanent QR codes, GPS photo
-            proof, worker digital signatures, and 5-language shop-floor views.
+            proof, digital signatures, and 5-language shop-floor views.
           </p>
         </div>
 
@@ -206,7 +214,7 @@ export function LandingShowcase() {
             href="/login"
             className="inline-flex min-h-12 items-center justify-center gap-2 rounded-lg bg-action-green px-5 text-sm font-semibold text-white transition-opacity hover:opacity-95"
           >
-            Start Free — No Credit Card Required
+            Start Free — No Card Required
             <ArrowRight className="h-4 w-4" />
           </Link>
           <Link
