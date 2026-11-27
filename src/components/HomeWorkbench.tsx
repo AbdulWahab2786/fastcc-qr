@@ -9,6 +9,7 @@ import {
   type ChangeEvent,
 } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import {
   Video,
   Camera,
@@ -49,6 +50,7 @@ import {
   parseSopStepsFromText,
   type IndustryTemplate,
 } from "@/lib/industry-templates";
+import { getSeoTemplateBySlug } from "@/data/seo-templates";
 import {
   INSPECTION_SCHEDULE_OPTIONS,
   normalizeInspectionSchedule,
@@ -111,10 +113,16 @@ interface HomeWorkbenchProps {
 }
 
 export function HomeWorkbench({ initialTemplateId }: HomeWorkbenchProps) {
+  const searchParams = useSearchParams();
+  const seoTemplateSlug = searchParams.get("seoTemplate");
+  const initialSeoTemplate = getSeoTemplateBySlug(seoTemplateSlug);
   const initialTemplate = getIndustryTemplateById(initialTemplateId);
+  const [prevSeoSlug, setPrevSeoSlug] = useState<string | null>(
+    () => seoTemplateSlug,
+  );
 
   const [activeTab, setActiveTab] = useState<WorkbenchTab>(() =>
-    initialTemplate ? "text" : "url",
+    initialTemplate || initialSeoTemplate ? "text" : "url",
   );
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(
     () => initialTemplate?.id ?? null,
@@ -124,22 +132,47 @@ export function HomeWorkbench({ initialTemplateId }: HomeWorkbenchProps) {
   const [urlTitle, setUrlTitle] = useState("Line B — Safety & Startup Guide");
   const [urlTarget, setUrlTarget] = useState("https://fastcc.app/sop/line-b");
   const [textTitle, setTextTitle] = useState(() =>
-    initialTemplate ? initialTemplate.title : "Compressor Daily Check",
+    initialSeoTemplate
+      ? initialSeoTemplate.title
+      : initialTemplate
+        ? initialTemplate.title
+        : "Compressor Daily Check",
   );
   const [sopCategory, setSopCategory] = useState(() =>
-    initialTemplate ? initialTemplate.category : "Operations",
+    initialSeoTemplate
+      ? initialSeoTemplate.industry
+      : initialTemplate
+        ? initialTemplate.category
+        : "Operations",
   );
   const [textBody, setTextBody] = useState(() =>
-    initialTemplate
-      ? formatTemplateStepsText(initialTemplate.steps)
-      : "1. Check oil sight glass.\n2. Drain moisture trap.\n3. Verify 8 bar cutout.",
+    initialSeoTemplate
+      ? formatTemplateStepsText(initialSeoTemplate.sopSteps)
+      : initialTemplate
+        ? formatTemplateStepsText(initialTemplate.steps)
+        : "1. Check oil sight glass.\n2. Drain moisture trap.\n3. Verify 8 bar cutout.",
   );
   const [checklistItems, setChecklistItems] = useState<VideoSopChecklistItem[]>(
     () =>
-      initialTemplate
-        ? initialTemplate.checklist.map((item) => ({ ...item }))
-        : [],
+      initialSeoTemplate
+        ? initialSeoTemplate.checklistItems.map((item) => ({ ...item }))
+        : initialTemplate
+          ? initialTemplate.checklist.map((item) => ({ ...item }))
+          : [],
   );
+
+  if (seoTemplateSlug !== prevSeoSlug) {
+    setPrevSeoSlug(seoTemplateSlug);
+    const matched = getSeoTemplateBySlug(seoTemplateSlug);
+    if (matched) {
+      setSelectedTemplateId(null);
+      setActiveTab("text");
+      setTextTitle(matched.title);
+      setSopCategory(matched.industry);
+      setTextBody(formatTemplateStepsText(matched.sopSteps));
+      setChecklistItems(matched.checklistItems.map((item) => ({ ...item })));
+    }
+  }
   const [newChecklistLabel, setNewChecklistLabel] = useState("");
   const [managerWhatsapp, setManagerWhatsapp] = useState("");
   const [siteFolder, setSiteFolder] = useState("");

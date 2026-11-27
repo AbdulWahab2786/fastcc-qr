@@ -36,7 +36,7 @@ export function Footer() {
             </h3>
             <ul className="mt-2.5 space-y-2 text-xs text-ink-muted">
               <li>
-                <Link href="/#templates" className="hover:text-ink hover:underline">
+                <Link href="/templates" className="hover:text-ink hover:underline">
                   Templates
                 </Link>
               </li>

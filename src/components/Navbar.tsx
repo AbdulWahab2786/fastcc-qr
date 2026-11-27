@@ -69,7 +69,7 @@ export function Navbar() {
           className="flex items-center gap-1 sm:gap-2"
         >
           <Link
-            href="/#templates"
+            href="/templates"
             className="hidden rounded-md px-3 py-1.5 text-sm font-medium text-ink-muted transition-colors hover:bg-canvas-muted hover:text-ink sm:inline-flex"
           >
             Templates
