@@ -1,4 +1,9 @@
-import type { Database, InspectionStatus, PlanTier } from "./database";
+import type {
+  Database,
+  EquipmentStatus,
+  InspectionStatus,
+  PlanTier,
+} from "./database";
 
 export type QrCodeRow = Database["public"]["Tables"]["qr_codes"]["Row"];
 export type QrCodeInsert = Database["public"]["Tables"]["qr_codes"]["Insert"];
@@ -31,7 +36,7 @@ export interface QrCodeWithSteps extends QrCodeRow {
   sop_steps: SopStepRow[];
 }
 
-export type { InspectionStatus };
+export type { EquipmentStatus, InspectionStatus };
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;

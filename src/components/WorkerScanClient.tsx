@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useSyncExternalStore, type ChangeEvent, type FormEvent } from "react";
+import { useRef, useState, useSyncExternalStore, type ChangeEvent, type FormEvent } from "react";
 import Link from "next/link";
 import {
   AlertTriangle,
@@ -14,8 +14,10 @@ import {
   Globe,
   Loader2,
   ShieldCheck,
+  Wrench,
   XCircle,
 } from "lucide-react";
+import { stampInspectionPhoto } from "@/lib/photo-watermark";
 import { createClient } from "@/lib/supabase/client";
 import {
   getDemoQrRecord,
@@ -23,9 +25,10 @@ import {
   getLocalQrRecord,
   getLocalSopSteps,
   saveLocalInspectionLog,
+  saveLocalQrRecord,
 } from "@/lib/qr-utils";
 import type { PaperFormField, VideoSopChecklistItem } from "@/types/ai";
-import type { InspectionStatus, Json } from "@/types/database";
+import type { EquipmentStatus, InspectionStatus, Json } from "@/types/database";
 import type { QrCodeRow, SopStepRow } from "@/types/qr";
 
 const WORKER_LANGUAGES = [
@@ -55,9 +58,59 @@ interface ParsedConfig {
 interface SubmittedConfirmation {
   inspectorName: string;
   status: InspectionStatus;
+  equipmentStatus: EquipmentStatus;
   submittedAt: string;
   savedLocally: boolean;
   photoName: string | null;
+}
+
+function formatLastInspected(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  const diffMs = Date.now() - date.getTime();
+  const diffMins = Math.floor(diffMs / 60_000);
+  if (diffMins < 1) return "Just now";
+  if (diffMins < 60) return `${diffMins}m ago`;
+  const diffHours = Math.floor(diffMins / 60);
+  if (diffHours < 24) return `${diffHours}h ago`;
+  return date.toLocaleString("en-GB", {
+    day: "numeric",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: true,
+  });
+}
+
+function getLiveStatusMeta(status: EquipmentStatus): {
+  label: string;
+  badgeClass: string;
+  dotClass: string;
+} {
+  switch (status) {
+    case "maintenance":
+      return {
+        label: "NEEDS MAINTENANCE",
+        badgeClass:
+          "border-amber-500/40 bg-amber-500/10 text-amber-700",
+        dotClass: "bg-amber-500",
+      };
+    case "faulty":
+      return {
+        label: "FAULTY — DO NOT USE",
+        badgeClass:
+          "border-alert-red/40 bg-alert-red/10 text-alert-red",
+        dotClass: "bg-alert-red",
+      };
+    case "ok":
+    default:
+      return {
+        label: "OPERATIONAL (OK)",
+        badgeClass:
+          "border-action-green/40 bg-action-green/10 text-action-green",
+        dotClass: "bg-action-green",
+      };
+  }
 }
 
 const subscribeNoop = () => () => {};
@@ -260,15 +313,30 @@ export function WorkerScanClient({
   );
   const [workerName, setWorkerName] = useState("");
   const [notes, setNotes] = useState("");
+  const [equipmentStatus, setEquipmentStatus] = useState<EquipmentStatus>("ok");
+  const [reportedStatus, setReportedStatus] = useState<EquipmentStatus | null>(
+    null,
+  );
+  const [reportedInspectedAt, setReportedInspectedAt] = useState<string | null>(
+    null,
+  );
   const [proofPhotoName, setProofPhotoName] = useState<string | null>(null);
   const [proofPhotoFile, setProofPhotoFile] = useState<File | null>(null);
   const [proofPhotoPreview, setProofPhotoPreview] = useState<string | null>(
     null,
   );
+  const [isStampingPhoto, setIsStampingPhoto] = useState(false);
+  const stampGenerationRef = useRef(0);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [confirmation, setConfirmation] =
     useState<SubmittedConfirmation | null>(null);
+
+  const liveEquipmentStatus: EquipmentStatus =
+    reportedStatus ?? record.current_status ?? "ok";
+  const liveLastInspectedAt =
+    reportedInspectedAt ?? record.last_inspected_at ?? null;
+  const liveStatusMeta = getLiveStatusMeta(liveEquipmentStatus);
 
   const checklistItems: VideoSopChecklistItem[] =
     parsedConfig.checklist.length > 0
@@ -279,18 +347,31 @@ export function WorkerScanClient({
     setCheckedItems((prev) => ({ ...prev, [idx]: !prev[idx] }));
   }
 
-  function handleProofPhotoChange(e: ChangeEvent<HTMLInputElement>) {
+  async function handleProofPhotoChange(e: ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
+
+    const generation = ++stampGenerationRef.current;
+    setIsStampingPhoto(true);
     setProofPhotoName(file.name);
-    setProofPhotoFile(file);
+
+    const stampedFile = await stampInspectionPhoto(file);
+    if (stampGenerationRef.current !== generation) return;
+
+    setProofPhotoName(stampedFile.name);
+    setProofPhotoFile(stampedFile);
+    setIsStampingPhoto(false);
+
     const reader = new FileReader();
     reader.onload = () => {
-      if (typeof reader.result === "string") {
+      if (
+        stampGenerationRef.current === generation &&
+        typeof reader.result === "string"
+      ) {
         setProofPhotoPreview(reader.result);
       }
     };
-    reader.readAsDataURL(file);
+    reader.readAsDataURL(stampedFile);
   }
 
   function handleFieldPhotoChange(
@@ -382,6 +463,7 @@ export function WorkerScanClient({
           qr_code_id: record.id,
           inspector_name: trimmedName,
           status,
+          equipment_status: equipmentStatus,
           notes: notes.trim() || null,
           ...(uploadedPhotoUrl ? { photo_url: uploadedPhotoUrl } : {}),
           step_results: stepResultsPayload,
@@ -399,16 +481,27 @@ export function WorkerScanClient({
         qr_code_id: record.id,
         inspector_name: trimmedName,
         status,
+        equipment_status: equipmentStatus,
         notes: notes.trim() || null,
         step_results: stepResultsPayload,
         created_at: submittedAt,
       });
+      if (!isDemoFallback) {
+        saveLocalQrRecord({
+          ...record,
+          current_status: equipmentStatus,
+          last_inspected_at: submittedAt,
+        });
+      }
     }
 
+    setReportedStatus(equipmentStatus);
+    setReportedInspectedAt(submittedAt);
     setIsSubmitting(false);
     setConfirmation({
       inspectorName: trimmedName,
       status,
+      equipmentStatus,
       submittedAt,
       savedLocally,
       photoName: proofPhotoName,
@@ -420,6 +513,7 @@ export function WorkerScanClient({
     setCheckedItems({});
     setFormValues({});
     setFieldPhotoNames({});
+    setEquipmentStatus("ok");
     setNotes("");
     setProofPhotoName(null);
     setProofPhotoFile(null);
@@ -484,6 +578,22 @@ export function WorkerScanClient({
             {record.title}
           </h1>
 
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-canvas px-3 py-2.5">
+            <span
+              className={`inline-flex items-center gap-2 rounded-md border px-2.5 py-1 font-mono text-xs font-bold tracking-wide ${liveStatusMeta.badgeClass}`}
+            >
+              <span
+                className={`h-2 w-2 rounded-full ${liveStatusMeta.dotClass}`}
+              />
+              {liveStatusMeta.label}
+            </span>
+            {liveLastInspectedAt ? (
+              <span className="font-mono text-xs text-ink-muted">
+                Last inspected: {formatLastInspected(liveLastInspectedAt)}
+              </span>
+            ) : null}
+          </div>
+
           {parsedConfig.summary || record.description ? (
             <p className="mt-1.5 text-sm leading-relaxed text-ink-muted">
               {parsedConfig.summary ?? record.description}
@@ -525,6 +635,14 @@ export function WorkerScanClient({
                   }`}
                 >
                   {confirmation.status}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-ink-muted">Equipment Status</span>
+                <span
+                  className={`inline-flex items-center gap-1.5 rounded border px-2 py-0.5 font-mono text-xs font-semibold ${getLiveStatusMeta(confirmation.equipmentStatus).badgeClass}`}
+                >
+                  {getLiveStatusMeta(confirmation.equipmentStatus).label}
                 </span>
               </div>
               <div className="flex items-center justify-between">
@@ -882,14 +1000,82 @@ export function WorkerScanClient({
 
                   <div>
                     <span className="block text-xs font-semibold uppercase tracking-wide text-ink-muted">
-                      Camera Photo Proof (Optional)
+                      Equipment Status *
                     </span>
+                    <div
+                      role="radiogroup"
+                      aria-label="Equipment status"
+                      className="mt-1.5 grid grid-cols-1 gap-2.5 sm:grid-cols-3"
+                    >
+                      <button
+                        type="button"
+                        role="radio"
+                        aria-checked={equipmentStatus === "ok"}
+                        onClick={() => setEquipmentStatus("ok")}
+                        className={`flex min-h-12 items-center justify-center gap-2 rounded-lg border px-3 text-sm font-bold transition-colors ${
+                          equipmentStatus === "ok"
+                            ? "border-action-green bg-action-green text-white"
+                            : "border-border bg-canvas text-ink hover:bg-canvas-muted"
+                        }`}
+                      >
+                        <CheckCircle2 className="h-4 w-4 shrink-0" />
+                        <span>OK</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        role="radio"
+                        aria-checked={equipmentStatus === "maintenance"}
+                        onClick={() => setEquipmentStatus("maintenance")}
+                        className={`flex min-h-12 items-center justify-center gap-2 rounded-lg border px-3 text-sm font-bold transition-colors ${
+                          equipmentStatus === "maintenance"
+                            ? "border-amber-500 bg-amber-500 text-white"
+                            : "border-border bg-canvas text-ink hover:bg-canvas-muted"
+                        }`}
+                      >
+                        <Wrench className="h-4 w-4 shrink-0" />
+                        <span>Needs Maintenance</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        role="radio"
+                        aria-checked={equipmentStatus === "faulty"}
+                        onClick={() => setEquipmentStatus("faulty")}
+                        className={`flex min-h-12 items-center justify-center gap-2 rounded-lg border px-3 text-sm font-bold transition-colors ${
+                          equipmentStatus === "faulty"
+                            ? "border-alert-red bg-alert-red text-white"
+                            : "border-border bg-canvas text-ink hover:bg-canvas-muted"
+                        }`}
+                      >
+                        <XCircle className="h-4 w-4 shrink-0" />
+                        <span>Faulty</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  <div>
+                    <div className="flex flex-wrap items-center justify-between gap-1.5">
+                      <span className="block text-xs font-semibold uppercase tracking-wide text-ink-muted">
+                        Camera Photo Proof (Optional)
+                      </span>
+                      <span className="inline-flex items-center gap-1 rounded border border-utility-blue/30 bg-utility-blue/10 px-2 py-0.5 text-[11px] font-medium text-utility-blue">
+                        <ShieldCheck className="h-3 w-3" />
+                        Live Camera Proof • Auto-stamped with Time &amp; GPS
+                      </span>
+                    </div>
                     <label className="mt-1.5 flex min-h-12 cursor-pointer items-center justify-center gap-2 rounded-lg border border-dashed border-border bg-canvas px-4 text-sm font-semibold text-ink transition-colors hover:bg-canvas-muted">
-                      <Camera className="h-5 w-5 text-utility-blue" />
+                      {isStampingPhoto ? (
+                        <Loader2 className="h-5 w-5 animate-spin text-utility-blue" />
+                      ) : (
+                        <Camera className="h-5 w-5 text-utility-blue" />
+                      )}
                       <span className="truncate">
-                        {proofPhotoName
-                          ? `Photo attached: ${proofPhotoName}`
-                          : "Take Photo Proof"}
+                        {isStampingPhoto
+                          ? "Stamping Time & GPS..."
+                          : proofPhotoName
+                            ? `Photo attached: ${proofPhotoName}`
+                            : "Take Photo Proof"}
                       </span>
                       <input
                         type="file"
@@ -905,7 +1091,7 @@ export function WorkerScanClient({
                         <img
                           src={proofPhotoPreview}
                           alt="Captured inspection proof"
-                          className="max-h-40 w-full object-cover"
+                          className="max-h-56 w-full object-cover"
                         />
                       </div>
                     ) : null}
@@ -937,7 +1123,7 @@ export function WorkerScanClient({
 
                   <button
                     type="submit"
-                    disabled={isSubmitting}
+                    disabled={isSubmitting || isStampingPhoto}
                     className="flex min-h-12 w-full items-center justify-center gap-2 rounded-lg bg-action-green px-4 text-base font-semibold text-white transition-opacity hover:opacity-95 disabled:opacity-60"
                   >
                     {isSubmitting ? (

@@ -7,6 +7,7 @@ export type Json =
   | Json[];
 
 export type InspectionStatus = "pass" | "fail" | "issue";
+export type EquipmentStatus = "ok" | "maintenance" | "faulty";
 export type PlanTier = "free" | "pro" | "business";
 
 export interface Database {
@@ -25,6 +26,8 @@ export interface Database {
           show_watermark: boolean;
           scan_count: number;
           last_scanned_at: string | null;
+          current_status: EquipmentStatus;
+          last_inspected_at: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -40,6 +43,8 @@ export interface Database {
           show_watermark?: boolean;
           scan_count?: number;
           last_scanned_at?: string | null;
+          current_status?: EquipmentStatus;
+          last_inspected_at?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -55,6 +60,8 @@ export interface Database {
           show_watermark?: boolean;
           scan_count?: number;
           last_scanned_at?: string | null;
+          current_status?: EquipmentStatus;
+          last_inspected_at?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -110,6 +117,7 @@ export interface Database {
           qr_code_id: string;
           inspector_name: string;
           status: InspectionStatus;
+          equipment_status: EquipmentStatus;
           notes: string | null;
           photo_url: string | null;
           step_results: Json;
@@ -120,6 +128,7 @@ export interface Database {
           qr_code_id: string;
           inspector_name: string;
           status: InspectionStatus;
+          equipment_status?: EquipmentStatus;
           notes?: string | null;
           photo_url?: string | null;
           step_results?: Json;
@@ -130,6 +139,7 @@ export interface Database {
           qr_code_id?: string;
           inspector_name?: string;
           status?: InspectionStatus;
+          equipment_status?: EquipmentStatus;
           notes?: string | null;
           photo_url?: string | null;
           step_results?: Json;

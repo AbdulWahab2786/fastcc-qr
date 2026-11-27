@@ -253,6 +253,8 @@ export async function createGuestQrCode(
     show_watermark: true,
     scan_count: 0,
     last_scanned_at: null,
+    current_status: "ok",
+    last_inspected_at: null,
     created_at: now,
     updated_at: now,
   };
@@ -392,6 +394,8 @@ export function getDemoQrRecord(idOrCode: string): QrCodeRow {
     show_watermark: true,
     scan_count: 0,
     last_scanned_at: null,
+    current_status: "ok",
+    last_inspected_at: null,
     created_at: now,
     updated_at: now,
   };

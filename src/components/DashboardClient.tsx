@@ -28,7 +28,7 @@ import {
 } from "@/lib/billing/constants";
 import { createClient } from "@/lib/supabase/client";
 import { getQrScanUrl } from "@/lib/qr-utils";
-import type { PlanTier } from "@/types/database";
+import type { EquipmentStatus, PlanTier } from "@/types/database";
 import type { InspectionLogRow, QrCodeRow } from "@/types/qr";
 
 interface DashboardClientProps {
@@ -74,6 +74,33 @@ function escapeCsvCell(value: string): string {
     return `"${value.replace(/"/g, '""')}"`;
   }
   return value;
+}
+
+function EquipmentStatusBadge({ status }: { status: EquipmentStatus }) {
+  if (status === "faulty") {
+    return (
+      <span className="inline-flex items-center gap-1.5 rounded-md border border-alert-red/30 bg-alert-red/10 px-2 py-0.5 font-mono text-xs font-semibold uppercase text-alert-red">
+        <span className="h-1.5 w-1.5 rounded-full bg-alert-red" />
+        Faulty
+      </span>
+    );
+  }
+
+  if (status === "maintenance") {
+    return (
+      <span className="inline-flex items-center gap-1.5 rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 font-mono text-xs font-semibold uppercase text-amber-700">
+        <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+        Maintenance
+      </span>
+    );
+  }
+
+  return (
+    <span className="inline-flex items-center gap-1.5 rounded-md border border-action-green/30 bg-action-green/10 px-2 py-0.5 font-mono text-xs font-semibold uppercase text-action-green">
+      <span className="h-1.5 w-1.5 rounded-full bg-action-green" />
+      OK
+    </span>
+  );
 }
 
 function StatusBadge({ status }: { status: InspectionLogRow["status"] }) {
@@ -128,6 +155,9 @@ export function DashboardClient({
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [errorBanner, setErrorBanner] = useState<string | null>(null);
   const [csvUpgradePrompt, setCsvUpgradePrompt] = useState(false);
+  const [statusFilter, setStatusFilter] = useState<"all" | EquipmentStatus>(
+    "all",
+  );
 
   const isPaid = isPaidPlan(plan);
   const planSpec = PLAN_SPECS[plan];
@@ -153,6 +183,25 @@ export function DashboardClient({
     () => qrCodes.reduce((sum, qr) => sum + (qr.scan_count ?? 0), 0),
     [qrCodes],
   );
+
+  const statusCounts = useMemo(() => {
+    const counts: Record<"all" | EquipmentStatus, number> = {
+      all: qrCodes.length,
+      faulty: 0,
+      maintenance: 0,
+      ok: 0,
+    };
+    for (const qr of qrCodes) {
+      const status = qr.current_status ?? "ok";
+      counts[status] += 1;
+    }
+    return counts;
+  }, [qrCodes]);
+
+  const filteredQrCodes = useMemo(() => {
+    if (statusFilter === "all") return qrCodes;
+    return qrCodes.filter((qr) => (qr.current_status ?? "ok") === statusFilter);
+  }, [qrCodes, statusFilter]);
 
   async function handleCopyLink(shortCode: string) {
     const url = getQrScanUrl(shortCode);
@@ -383,16 +432,66 @@ export function DashboardClient({
 
       {/* My QR Codes */}
       <section aria-labelledby="my-qr-heading" className="mb-10">
-        <div className="mb-3 flex items-center justify-between">
-          <h2
-            id="my-qr-heading"
-            className="text-base font-semibold tracking-tight text-ink"
-          >
-            My QR Codes
-          </h2>
-          <span className="font-mono text-xs text-ink-muted">
-            {qrCodes.length} {qrCodes.length === 1 ? "record" : "records"}
-          </span>
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <h2
+              id="my-qr-heading"
+              className="text-base font-semibold tracking-tight text-ink"
+            >
+              My QR Codes
+            </h2>
+            <span className="font-mono text-xs text-ink-muted">
+              {filteredQrCodes.length}{" "}
+              {filteredQrCodes.length === 1 ? "record" : "records"}
+            </span>
+          </div>
+
+          {qrCodes.length > 0 ? (
+            <div
+              role="group"
+              aria-label="Filter QR codes by equipment status"
+              className="flex flex-wrap items-center gap-1.5"
+            >
+              {(
+                [
+                  { id: "all", label: "All" },
+                  { id: "faulty", label: "Faulty" },
+                  { id: "maintenance", label: "Maintenance" },
+                  { id: "ok", label: "OK" },
+                ] as const
+              ).map((pill) => {
+                const active = statusFilter === pill.id;
+                const count = statusCounts[pill.id];
+                const activeClasses =
+                  pill.id === "faulty"
+                    ? "border-alert-red bg-alert-red text-white"
+                    : pill.id === "maintenance"
+                      ? "border-amber-500 bg-amber-500 text-white"
+                      : pill.id === "ok"
+                        ? "border-action-green bg-action-green text-white"
+                        : "border-ink bg-ink text-white";
+
+                return (
+                  <button
+                    key={pill.id}
+                    type="button"
+                    onClick={() => setStatusFilter(pill.id)}
+                    aria-pressed={active}
+                    className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+                      active
+                        ? activeClasses
+                        : "border-border bg-surface text-ink-muted hover:bg-canvas-muted hover:text-ink"
+                    }`}
+                  >
+                    <span>{pill.label}</span>
+                    <span className="font-mono text-[11px] opacity-80">
+                      {count}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          ) : null}
         </div>
 
         {qrCodes.length === 0 ? (
@@ -413,6 +512,20 @@ export function DashboardClient({
               Create First QR Code
             </Link>
           </div>
+        ) : filteredQrCodes.length === 0 ? (
+          <div className="rounded-xl border border-border bg-surface p-8 text-center">
+            <p className="text-sm font-medium text-ink">
+              No QR codes match the{" "}
+              <span className="font-mono uppercase">{statusFilter}</span> filter.
+            </p>
+            <button
+              type="button"
+              onClick={() => setStatusFilter("all")}
+              className="mt-3 inline-flex items-center rounded-lg border border-border bg-canvas px-3 py-1.5 text-xs font-medium text-ink hover:bg-canvas-muted"
+            >
+              Show all QR codes
+            </button>
+          </div>
         ) : (
           <div className="overflow-hidden rounded-xl border border-border bg-surface">
             <div className="overflow-x-auto">
@@ -420,6 +533,7 @@ export function DashboardClient({
                 <thead>
                   <tr className="border-b border-border bg-canvas-muted/70 text-xs font-medium uppercase tracking-wider text-ink-muted">
                     <th className="px-4 py-3">Title</th>
+                    <th className="px-4 py-3">Status</th>
                     <th className="px-4 py-3">Type</th>
                     <th className="px-4 py-3">Short Code</th>
                     <th className="px-4 py-3">Scans</th>
@@ -428,7 +542,7 @@ export function DashboardClient({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
-                  {qrCodes.map((qr) => {
+                  {filteredQrCodes.map((qr) => {
                     const isCopied = copiedCode === qr.short_code;
                     const isDeleting = deletingId === qr.id;
                     return (
@@ -443,6 +557,11 @@ export function DashboardClient({
                               {qr.description}
                             </div>
                           ) : null}
+                        </td>
+                        <td className="px-4 py-3.5 whitespace-nowrap">
+                          <EquipmentStatusBadge
+                            status={qr.current_status ?? "ok"}
+                          />
                         </td>
                         <td className="px-4 py-3.5 whitespace-nowrap">
                           <TypeBadge type={qr.type} category={qr.category} />
