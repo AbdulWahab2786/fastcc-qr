@@ -26,6 +26,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { SignaturePad } from "@/components/SignaturePad";
+import { trackEvent } from "@/components/AnalyticsProvider";
 import { getScheduleStatus } from "@/lib/inspection-schedule";
 import { stampInspectionPhoto } from "@/lib/photo-watermark";
 import { createClient } from "@/lib/supabase/client";
@@ -791,6 +792,12 @@ export function WorkerScanClient({
       photoUrl: uploadedPhotoUrl,
       signatureDataUrl,
       notes: trimmedNotes,
+    });
+    trackEvent("scan_submitted", {
+      status,
+      equipmentStatus,
+      savedLocally,
+      qrType: record.type,
     });
   }
 

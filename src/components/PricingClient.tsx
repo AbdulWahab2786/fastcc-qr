@@ -21,6 +21,7 @@ import {
   type PaidPlanTier,
 } from "@/lib/billing/constants";
 import type { PlanTier } from "@/types/database";
+import { trackEvent } from "@/components/AnalyticsProvider";
 
 interface RazorpaySuccessResponse {
   razorpay_order_id: string;
@@ -287,6 +288,7 @@ export function PricingClient({
 
   async function handleUpgrade(plan: PaidPlanTier) {
     setErrorMessage(null);
+    trackEvent("upgrade_clicked", { plan, isAuthenticated });
 
     if (!isAuthenticated) {
       router.push("/login?next=/pricing");
@@ -371,6 +373,7 @@ export function PricingClient({
               return;
             }
 
+            trackEvent("payment_completed", { plan });
             router.push("/dashboard?upgraded=true");
             router.refresh();
           } catch {

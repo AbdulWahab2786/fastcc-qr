@@ -33,6 +33,7 @@ import {
 } from "lucide-react";
 import { BulkImportModal } from "@/components/BulkImportModal";
 import { BulkPrintModal } from "@/components/BulkPrintModal";
+import { trackEvent } from "@/components/AnalyticsProvider";
 import {
   AUDIT_DATE_RANGE_OPTIONS,
   exportAuditReportCsv,
@@ -383,6 +384,11 @@ export function DashboardClient({
         return;
       }
 
+      trackEvent("qr_generated", {
+        source: "dashboard_template",
+        templateId: template.id,
+        type: "sop",
+      });
       router.push(`/studio/${result.record.short_code}`);
     } catch {
       setErrorBanner(

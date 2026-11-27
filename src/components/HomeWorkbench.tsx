@@ -39,6 +39,7 @@ import {
 } from "lucide-react";
 import { QrCodePreview } from "@/components/QrCodePreview";
 import { LandingHero } from "@/components/LandingHero";
+import { trackEvent } from "@/components/AnalyticsProvider";
 import {
   QrBeautifyControls,
   QrLabelThemeGrid,
@@ -562,6 +563,11 @@ export function HomeWorkbench({ initialTemplateId }: HomeWorkbenchProps) {
       };
 
       setSavedQr(nextSaved);
+      trackEvent("qr_generated", {
+        source: "workbench",
+        type: result.record.type,
+        isLocalFallback: result.isLocalFallback,
+      });
 
       if (result.isLocalFallback && result.notice) {
         setBannerNotice(result.notice);
@@ -888,6 +894,11 @@ export function HomeWorkbench({ initialTemplateId }: HomeWorkbenchProps) {
           isLocalFallback: Boolean(videoResult.isLocalFallback),
           showWatermark: Boolean(videoResult.show_watermark ?? true),
         });
+        trackEvent("qr_generated", {
+          source: "ai_video_sop",
+          type: "sop",
+          isLocalFallback: Boolean(videoResult.isLocalFallback),
+        });
         setAiStatusMessage(
           `Extracted ${videoResult.steps.length} SOP steps and ${videoResult.checklist.length} QC checks for "${videoResult.title}".`,
         );
@@ -931,6 +942,11 @@ export function HomeWorkbench({ initialTemplateId }: HomeWorkbenchProps) {
           subtitle: `${paperResult.fields.length} form fields • ${aiLanguage}`,
           isLocalFallback: Boolean(paperResult.isLocalFallback),
           showWatermark: Boolean(paperResult.show_watermark ?? true),
+        });
+        trackEvent("qr_generated", {
+          source: "ai_paper_form",
+          type: "paper_form",
+          isLocalFallback: Boolean(paperResult.isLocalFallback),
         });
         setAiStatusMessage(
           `Digitized ${paperResult.fields.length} inspection fields for "${paperResult.title}".`,

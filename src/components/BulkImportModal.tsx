@@ -30,6 +30,7 @@ import {
 } from "@/lib/csv-bulk-import";
 import { generateShortCode, getQrFolder } from "@/lib/qr-utils";
 import { createClient } from "@/lib/supabase/client";
+import { trackEvent } from "@/components/AnalyticsProvider";
 import type { Json, PlanTier } from "@/types/database";
 import type { QrCodeInsert, QrCodeRow, SopStepInsert } from "@/types/qr";
 
@@ -261,6 +262,11 @@ export function BulkImportModal({
 
       onImported(createdQrs);
       setImportedQrs(createdQrs);
+      trackEvent("qr_generated", {
+        source: "bulk_csv",
+        count: createdQrs.length,
+        type: "sop",
+      });
     } catch {
       if (createdQrs.length > 0) {
         onImported(createdQrs);
