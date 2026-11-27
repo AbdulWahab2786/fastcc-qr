@@ -1,5 +1,6 @@
 import { Suspense } from "react";
 import { redirect } from "next/navigation";
+import { connection } from "next/server";
 import { LoginForm } from "@/components/LoginForm";
 import { getSafeNextPath } from "@/lib/auth/redirect";
 import { hasSupabaseEnv } from "@/lib/supabase/env";
@@ -10,6 +11,7 @@ interface LoginPageProps {
 }
 
 async function LoginGate({ searchParams }: LoginPageProps) {
+  await connection();
   const { next, error } = await searchParams;
   const nextPath = getSafeNextPath(next);
 

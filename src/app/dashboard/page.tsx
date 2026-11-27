@@ -1,5 +1,6 @@
 import { Suspense } from "react";
 import { redirect } from "next/navigation";
+import { connection } from "next/server";
 import { DashboardClient } from "@/components/DashboardClient";
 import { getUserPlanStatus } from "@/lib/billing/plans";
 import { hasSupabaseEnv } from "@/lib/supabase/env";
@@ -11,6 +12,7 @@ interface DashboardPageProps {
 }
 
 async function DashboardContent({ searchParams }: DashboardPageProps) {
+  await connection();
   if (!hasSupabaseEnv()) {
     redirect("/login");
   }

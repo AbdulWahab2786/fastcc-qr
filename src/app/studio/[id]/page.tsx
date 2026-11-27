@@ -1,4 +1,5 @@
 import { Suspense } from "react";
+import { connection } from "next/server";
 import { StudioClient } from "@/components/StudioClient";
 import { getUserPlanStatus } from "@/lib/billing/plans";
 import { extractUniqueFolders } from "@/lib/qr-utils";
@@ -38,6 +39,7 @@ async function loadQrRecord(rawId: string): Promise<QrCodeRow | null> {
 }
 
 async function StudioContent({ params }: StudioPageProps) {
+  await connection();
   const { id } = await params;
   const cleanId = normalizeRouteId(id);
   const supabaseConfigured = hasSupabaseEnv();

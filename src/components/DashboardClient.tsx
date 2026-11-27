@@ -40,6 +40,7 @@ import {
   extractSignatureDataUrl,
   filterLogsByDateRange,
   getAuditDateRangeLabel,
+  resolveLogEquipmentStatus,
   type AuditDateRange,
 } from "@/lib/audit-report-export";
 import {
@@ -140,22 +141,6 @@ function EquipmentStatusBadge({ status }: { status: EquipmentStatus }) {
     <span className="inline-flex items-center gap-1.5 rounded-md border border-action-green/30 bg-action-green/10 px-2 py-0.5 font-mono text-xs font-semibold uppercase text-action-green">
       <span className="h-1.5 w-1.5 rounded-full bg-action-green" />
       OK
-    </span>
-  );
-}
-
-function StatusBadge({ status }: { status: InspectionLogRow["status"] }) {
-  if (status === "pass") {
-    return (
-      <span className="inline-flex items-center rounded-md border border-action-green/30 bg-action-green/10 px-2 py-0.5 font-mono text-xs font-medium uppercase text-action-green">
-        PASS
-      </span>
-    );
-  }
-
-  return (
-    <span className="inline-flex items-center rounded-md border border-alert-red/30 bg-alert-red/10 px-2 py-0.5 font-mono text-xs font-medium uppercase text-alert-red">
-      {status}
     </span>
   );
 }
@@ -1365,7 +1350,9 @@ export function DashboardClient({
                         </td>
                         <td className="px-4 py-3.5">
                           <div className="flex flex-wrap items-center gap-2">
-                            <StatusBadge status={log.status} />
+                            <EquipmentStatusBadge
+                              status={resolveLogEquipmentStatus(log)}
+                            />
                             {log.notes ? (
                               <span className="max-w-md truncate text-xs text-ink-muted">
                                 {log.notes}

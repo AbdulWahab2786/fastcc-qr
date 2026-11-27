@@ -34,6 +34,40 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+const TRANSLATION_TIMEOUT_MS = 5500;
+const FALLBACK_TRANSLATION_MODELS = [
+  "gemini-3.1-flash-lite",
+  "gemini-3.5-flash-lite",
+] as const;
+
+async function generateWithTimeout(
+  ai: ReturnType<typeof getGeminiClient>,
+  model: string,
+  prompt: string,
+) {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      ai.models.generateContent({
+        model,
+        contents: [prompt],
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: TRANSLATION_SCHEMA,
+        },
+      }),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`Translation timed out for ${model}`)),
+          TRANSLATION_TIMEOUT_MS,
+        );
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 export async function POST(request: Request) {
   let body: unknown;
   try {
@@ -105,14 +139,24 @@ export async function POST(request: Request) {
       JSON.stringify({ title, items }),
     ].join("\n");
 
-    const response = await ai.models.generateContent({
-      model: GEMINI_MODEL,
-      contents: [prompt],
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: TRANSLATION_SCHEMA,
-      },
-    });
+    const candidateModels = Array.from(
+      new Set([GEMINI_MODEL, ...FALLBACK_TRANSLATION_MODELS]),
+    );
+
+    let response;
+    let lastError: unknown;
+    for (const model of candidateModels) {
+      try {
+        response = await generateWithTimeout(ai, model, prompt);
+        break;
+      } catch (err) {
+        lastError = err;
+      }
+    }
+
+    if (!response) {
+      throw lastError ?? new Error("All translation models failed.");
+    }
 
     const parsed = parseGeminiJson(response.text);
     const data = isRecord(parsed) ? parsed : {};

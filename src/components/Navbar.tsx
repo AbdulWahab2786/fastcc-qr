@@ -1,10 +1,12 @@
 import { Suspense } from "react";
 import Link from "next/link";
+import { connection } from "next/server";
 import { SignOutButton } from "@/components/NavbarAuthControls";
 import { hasSupabaseEnv } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
 
 async function NavbarAuth() {
+  await connection();
   let isLoggedIn = false;
 
   if (hasSupabaseEnv()) {

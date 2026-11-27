@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -42,7 +43,7 @@ export async function generateMetadata({
   };
 }
 
-export default async function ComparePage({ params }: ComparePageProps) {
+async function CompareContent({ params }: ComparePageProps) {
   const { slug } = await params;
   const comparison =
     COMPARISONS[slug as keyof typeof COMPARISONS] ?? undefined;
@@ -215,5 +216,19 @@ export default async function ComparePage({ params }: ComparePageProps) {
         </div>
       </section>
     </main>
+  );
+}
+
+export default function ComparePage({ params }: ComparePageProps) {
+  return (
+    <Suspense
+      fallback={
+        <main className="mx-auto max-w-5xl px-4 py-10 sm:px-6">
+          <div className="h-96 animate-pulse rounded-xl border border-border bg-surface" />
+        </main>
+      }
+    >
+      <CompareContent params={params} />
+    </Suspense>
   );
 }

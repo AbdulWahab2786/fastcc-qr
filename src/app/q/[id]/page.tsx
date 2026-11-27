@@ -1,4 +1,5 @@
 import { Suspense } from "react";
+import { connection } from "next/server";
 import { WorkerScanClient } from "@/components/WorkerScanClient";
 import { hasSupabaseEnv } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
@@ -60,6 +61,7 @@ async function loadWorkerQrData(rawId: string): Promise<{
 }
 
 async function WorkerQrContent({ params }: WorkerQrPageProps) {
+  await connection();
   const { id } = await params;
   const cleanId = normalizeRouteId(id);
   const supabaseConfigured = hasSupabaseEnv();

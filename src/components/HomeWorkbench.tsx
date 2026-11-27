@@ -9,7 +9,7 @@ import {
   type ChangeEvent,
 } from "react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   Video,
   Camera,
@@ -49,6 +49,7 @@ import {
   INDUSTRY_TEMPLATES,
   parseSopStepsFromText,
   type IndustryTemplate,
+  type IndustryTemplateStep,
 } from "@/lib/industry-templates";
 import { getSeoTemplateBySlug } from "@/data/seo-templates";
 import {
@@ -63,6 +64,7 @@ import {
   EMPTY_FOLDER_SUGGESTIONS,
   extractUniqueFolders,
   getLocalFolderSuggestions,
+  getLocalQrRecord,
   getQrScanUrl,
   saveLocalQrRecord,
   saveLocalSopSteps,
@@ -98,12 +100,22 @@ const INDUSTRY_TEMPLATE_ICONS: Record<string, typeof Utensils> = {
   "warehouse-forklift-check": Truck,
 };
 
-interface ActivePreview {
+interface SavedQrPreview {
+  id: string;
   shortCode: string;
+  userId: string | null;
   title: string;
   subtitle: string;
   isLocalFallback: boolean;
-  isDemo: boolean;
+  showWatermark: boolean;
+  fingerprint: string;
+}
+
+function normalizeDestinationUrl(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed) return "";
+  if (/^https?:\/\//i.test(trimmed)) return trimmed;
+  return `https://${trimmed}`;
 }
 
 const subscribeNoop = () => () => {};
@@ -113,6 +125,7 @@ interface HomeWorkbenchProps {
 }
 
 export function HomeWorkbench({ initialTemplateId }: HomeWorkbenchProps) {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const seoTemplateSlug = searchParams.get("seoTemplate");
   const initialSeoTemplate = getSeoTemplateBySlug(seoTemplateSlug);
@@ -120,12 +133,24 @@ export function HomeWorkbench({ initialTemplateId }: HomeWorkbenchProps) {
   const [prevSeoSlug, setPrevSeoSlug] = useState<string | null>(
     () => seoTemplateSlug,
   );
+  const [prevTemplateId, setPrevTemplateId] = useState<string | undefined>(
+    () => initialTemplateId,
+  );
 
   const [activeTab, setActiveTab] = useState<WorkbenchTab>(() =>
     initialTemplate || initialSeoTemplate ? "text" : "url",
   );
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(
     () => initialTemplate?.id ?? null,
+  );
+  const [templateRefSteps, setTemplateRefSteps] = useState<
+    readonly IndustryTemplateStep[]
+  >(() =>
+    initialSeoTemplate
+      ? initialSeoTemplate.sopSteps
+      : initialTemplate
+        ? initialTemplate.steps
+        : [],
   );
 
   // Standard URL & SOP/Checklist inputs
@@ -145,6 +170,13 @@ export function HomeWorkbench({ initialTemplateId }: HomeWorkbenchProps) {
         ? initialTemplate.category
         : "Operations",
   );
+  const [sopSummary, setSopSummary] = useState(() =>
+    initialSeoTemplate
+      ? initialSeoTemplate.shortDescription
+      : initialTemplate
+        ? initialTemplate.description
+        : "",
+  );
   const [textBody, setTextBody] = useState(() =>
     initialSeoTemplate
       ? formatTemplateStepsText(initialSeoTemplate.sopSteps)
@@ -161,23 +193,13 @@ export function HomeWorkbench({ initialTemplateId }: HomeWorkbenchProps) {
           : [],
   );
 
-  if (seoTemplateSlug !== prevSeoSlug) {
-    setPrevSeoSlug(seoTemplateSlug);
-    const matched = getSeoTemplateBySlug(seoTemplateSlug);
-    if (matched) {
-      setSelectedTemplateId(null);
-      setActiveTab("text");
-      setTextTitle(matched.title);
-      setSopCategory(matched.industry);
-      setTextBody(formatTemplateStepsText(matched.sopSteps));
-      setChecklistItems(matched.checklistItems.map((item) => ({ ...item })));
-    }
-  }
   const [newChecklistLabel, setNewChecklistLabel] = useState("");
   const [managerWhatsapp, setManagerWhatsapp] = useState("");
   const [siteFolder, setSiteFolder] = useState("");
   const [inspectionSchedule, setInspectionSchedule] =
-    useState<InspectionSchedule>("none");
+    useState<InspectionSchedule>(() =>
+      initialSeoTemplate ? initialSeoTemplate.frequency : "none",
+    );
   const [remoteFolders, setRemoteFolders] = useState<string[]>([]);
   const [createdFolders, setCreatedFolders] = useState<string[]>([]);
 
@@ -250,30 +272,133 @@ export function HomeWorkbench({ initialTemplateId }: HomeWorkbenchProps) {
     "none" | "beautify" | "theme"
   >("none");
   const [isDownloadingPng, setIsDownloadingPng] = useState(false);
-  const [preview, setPreview] = useState<ActivePreview>({
-    shortCode: "demo",
-    title: "D2C Packing Station #04",
-    subtitle: "Scan for Hindi/English Steps",
-    isLocalFallback: false,
-    isDemo: true,
-  });
+  const [savedQr, setSavedQr] = useState<SavedQrPreview | null>(null);
+  const [aiPreview, setAiPreview] = useState<{
+    shortCode: string;
+    title: string;
+    subtitle: string;
+    isLocalFallback: boolean;
+    showWatermark: boolean;
+  } | null>(null);
 
-  const scanUrl = getQrScanUrl(preview.shortCode);
+  if (seoTemplateSlug !== prevSeoSlug) {
+    setPrevSeoSlug(seoTemplateSlug);
+    const matched = getSeoTemplateBySlug(seoTemplateSlug);
+    if (matched) {
+      setSelectedTemplateId(null);
+      setTemplateRefSteps(matched.sopSteps);
+      setActiveTab("text");
+      setTextTitle(matched.title);
+      setSopCategory(matched.industry);
+      setSopSummary(matched.shortDescription);
+      setTextBody(formatTemplateStepsText(matched.sopSteps));
+      setChecklistItems(matched.checklistItems.map((item) => ({ ...item })));
+      setInspectionSchedule(matched.frequency);
+      setSavedQr(null);
+      setBannerNotice(null);
+      setQrUpgradeMessage(null);
+    }
+  }
+
+  if (initialTemplateId !== prevTemplateId) {
+    setPrevTemplateId(initialTemplateId);
+    const matched = getIndustryTemplateById(initialTemplateId);
+    if (matched) {
+      setSelectedTemplateId(matched.id);
+      setTemplateRefSteps(matched.steps);
+      setActiveTab("text");
+      setTextTitle(matched.title);
+      setSopCategory(matched.category);
+      setSopSummary(matched.description);
+      setTextBody(formatTemplateStepsText(matched.steps));
+      setChecklistItems(matched.checklist.map((item) => ({ ...item })));
+      setSavedQr(null);
+      setBannerNotice(null);
+      setQrUpgradeMessage(null);
+    }
+  }
+
   const selectedTemplate = getIndustryTemplateById(selectedTemplateId);
 
-  const livePreviewTitle = preview.isDemo
-    ? activeTab === "url"
-      ? urlTitle.trim() || preview.title
-      : activeTab === "text"
-        ? textTitle.trim() || preview.title
-        : preview.title
-    : preview.title;
+  const normalizedUrlTarget = useMemo(
+    () => normalizeDestinationUrl(urlTarget),
+    [urlTarget],
+  );
 
-  const livePreviewSubtitle = preview.isDemo
-    ? activeTab === "url"
-      ? "Scan for SOP & Link"
-      : "Scan for SOP & Logs"
-    : preview.subtitle;
+  const parsedTextSteps = useMemo(
+    () => parseSopStepsFromText(textBody, templateRefSteps),
+    [textBody, templateRefSteps],
+  );
+
+  const currentFingerprint = useMemo(() => {
+    if (activeTab === "url") {
+      return JSON.stringify({
+        tab: "url",
+        title: urlTitle.trim(),
+        target: normalizedUrlTarget,
+        folder: siteFolder.trim(),
+        schedule: inspectionSchedule,
+      });
+    }
+    return JSON.stringify({
+      tab: "text",
+      title: textTitle.trim(),
+      category: sopCategory,
+      summary: sopSummary.trim(),
+      body: textBody,
+      checklist: checklistItems,
+      folder: siteFolder.trim(),
+      schedule: inspectionSchedule,
+      whatsapp: managerWhatsapp.trim(),
+    });
+  }, [
+    activeTab,
+    urlTitle,
+    normalizedUrlTarget,
+    textTitle,
+    sopCategory,
+    sopSummary,
+    textBody,
+    checklistItems,
+    siteFolder,
+    inspectionSchedule,
+    managerWhatsapp,
+  ]);
+
+  const isAiTab = activeTab === "video" || activeTab === "paper";
+  const currentSavedQr =
+    !isAiTab && savedQr !== null && savedQr.fingerprint === currentFingerprint
+      ? savedQr
+      : null;
+  const isSavedCurrent = isAiTab ? aiPreview !== null : currentSavedQr !== null;
+
+  const activeShortCode = isAiTab
+    ? (aiPreview?.shortCode ?? "demo")
+    : currentSavedQr
+      ? currentSavedQr.shortCode
+      : "";
+
+  const scanUrl = activeShortCode
+    ? getQrScanUrl(activeShortCode)
+    : getQrScanUrl("draft");
+
+  const livePreviewTitle = isAiTab
+    ? (aiPreview?.title ?? "D2C Packing Station #04")
+    : currentSavedQr
+      ? currentSavedQr.title
+      : activeTab === "url"
+        ? urlTitle.trim() || "Untitled URL QR"
+        : textTitle.trim() || "Untitled Operations SOP";
+
+  const livePreviewSubtitle = isAiTab
+    ? (aiPreview?.subtitle ?? "Scan for Hindi/English Steps")
+    : currentSavedQr
+      ? currentSavedQr.subtitle
+      : activeTab === "url"
+        ? normalizedUrlTarget.slice(0, 48) || "Scan to open operational link"
+        : parsedTextSteps.length > 0 || checklistItems.length > 0
+          ? `${parsedTextSteps.length} SOP ${parsedTextSteps.length === 1 ? "step" : "steps"} • ${checklistItems.length} ${checklistItems.length === 1 ? "check" : "checks"}`
+          : "Scan for SOP & Logs";
 
   const liveScheduleLabel =
     inspectionSchedule !== "none"
@@ -282,19 +407,198 @@ export function HomeWorkbench({ initialTemplateId }: HomeWorkbenchProps) {
         )?.label ?? "")
       : "";
 
+  async function syncSavedThemeConfig(
+    nextTheme: QrLabelThemeId,
+    nextColor: QrThemeColorId,
+    nextDotStyle: QrDotStyle,
+  ) {
+    if (!isSavedCurrent || !savedQr) return;
+    const isUrlTab = activeTab === "url";
+    const trimmedWhatsapp = managerWhatsapp.trim();
+    const rawFolder = siteFolder.trim();
+    const normalizedFolder =
+      rawFolder && rawFolder.toLowerCase() !== "unassigned" ? rawFolder : "";
+
+    const updatedConfig: Json = isUrlTab
+      ? ({
+          label_theme: nextTheme,
+          theme_color: nextColor,
+          ...(nextDotStyle !== "square" ? { dot_style: nextDotStyle } : {}),
+          ...(normalizedFolder ? { folder: normalizedFolder } : {}),
+          ...(inspectionSchedule !== "none"
+            ? { inspection_schedule: inspectionSchedule }
+            : {}),
+        } as Json)
+      : buildSopConfigJson({
+          summary: sopSummary.trim() || undefined,
+          checklist: checklistItems,
+          managerWhatsapp: trimmedWhatsapp,
+          folder: normalizedFolder,
+          inspectionSchedule,
+          labelTheme: nextTheme,
+          themeColor: nextColor,
+          dotStyle: nextDotStyle,
+        });
+
+    const localExisting = getLocalQrRecord(savedQr.shortCode);
+    if (localExisting) {
+      saveLocalQrRecord({
+        ...localExisting,
+        config_json: updatedConfig,
+        updated_at: new Date().toISOString(),
+      });
+    }
+
+    if (hasSupabaseEnv() && savedQr.userId && !savedQr.isLocalFallback) {
+      try {
+        const supabase = createClient();
+        await supabase
+          .from("qr_codes")
+          .update({ config_json: updatedConfig })
+          .eq("id", savedQr.id)
+          .eq("user_id", savedQr.userId);
+      } catch {
+        // Non-blocking theme sync failure.
+      }
+    }
+  }
+
+  async function ensureSavedQr(): Promise<SavedQrPreview | null> {
+    if (isSavedCurrent && savedQr) {
+      return savedQr;
+    }
+
+    setIsSubmitting(true);
+    setBannerNotice(null);
+    setQrUpgradeMessage(null);
+
+    try {
+      const isUrlTab = activeTab === "url";
+      const parsedSteps = isUrlTab ? [] : parsedTextSteps;
+      const isSopMode =
+        !isUrlTab &&
+        (checklistItems.length > 0 ||
+          parsedSteps.length > 0 ||
+          Boolean(managerWhatsapp.trim()));
+
+      const title = isUrlTab ? urlTitle : textTitle;
+      const trimmedSummary = sopSummary.trim();
+      const description = isUrlTab
+        ? normalizedUrlTarget
+        : isSopMode
+          ? trimmedSummary ||
+            `${parsedSteps.length} SOP ${parsedSteps.length === 1 ? "step" : "steps"}${checklistItems.length > 0 ? ` • ${checklistItems.length} ${checklistItems.length === 1 ? "check" : "checks"}` : ""}`
+          : textBody;
+      const category = isUrlTab ? "url" : isSopMode ? sopCategory : "text";
+      const trimmedWhatsapp = managerWhatsapp.trim();
+      const rawFolder = siteFolder.trim();
+      const normalizedFolder =
+        rawFolder && rawFolder.toLowerCase() !== "unassigned" ? rawFolder : "";
+
+      const urlConfigObj: Record<string, Json> = {
+        label_theme: labelTheme,
+        theme_color: themeColor,
+      };
+      if (dotStyle !== "square") {
+        urlConfigObj.dot_style = dotStyle;
+      }
+      if (normalizedFolder) {
+        urlConfigObj.folder = normalizedFolder;
+      }
+      if (inspectionSchedule !== "none") {
+        urlConfigObj.inspection_schedule = inspectionSchedule;
+      }
+
+      const configJson: Json | undefined = isUrlTab
+        ? (urlConfigObj as Json)
+        : buildSopConfigJson({
+            summary: trimmedSummary || undefined,
+            checklist: checklistItems,
+            managerWhatsapp: trimmedWhatsapp,
+            folder: normalizedFolder,
+            inspectionSchedule,
+            labelTheme,
+            themeColor,
+            dotStyle,
+          });
+
+      const result = await createGuestQrCode({
+        title,
+        description,
+        category,
+        type: isUrlTab ? "url" : isSopMode ? "sop" : "standard",
+        configJson,
+        steps: isSopMode ? parsedSteps : undefined,
+      });
+
+      if (result.blockedByPlanLimit || !result.record) {
+        setQrUpgradeMessage(
+          result.notice ||
+            "Free plan limit reached (10/10 QR codes). Upgrade to Pro for unlimited QR codes.",
+        );
+        return null;
+      }
+
+      if (normalizedFolder) {
+        setCreatedFolders((prev) =>
+          prev.includes(normalizedFolder) ? prev : [...prev, normalizedFolder],
+        );
+      }
+
+      const nextSaved: SavedQrPreview = {
+        id: result.record.id,
+        shortCode: result.record.short_code,
+        userId: result.record.user_id,
+        title: result.record.title,
+        subtitle: isSopMode
+          ? `${parsedSteps.length} SOP ${parsedSteps.length === 1 ? "step" : "steps"} • ${checklistItems.length} ${checklistItems.length === 1 ? "check" : "checks"}`
+          : result.record.description
+            ? result.record.description.slice(0, 64)
+            : "Scan for instructions",
+        isLocalFallback: result.isLocalFallback,
+        showWatermark: result.record.show_watermark,
+        fingerprint: currentFingerprint,
+      };
+
+      setSavedQr(nextSaved);
+
+      if (result.isLocalFallback && result.notice) {
+        setBannerNotice(result.notice);
+      }
+
+      return nextSaved;
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
   async function handleDownloadPreviewPng() {
     setIsDownloadingPng(true);
     try {
+      let targetShortCode = activeShortCode;
+      let targetScanUrl = scanUrl;
+      let targetTitle = livePreviewTitle;
+      let targetSubtitle = livePreviewSubtitle;
+
+      if (!isAiTab && !isSavedCurrent) {
+        const saved = await ensureSavedQr();
+        if (!saved) return;
+        targetShortCode = saved.shortCode;
+        targetScanUrl = getQrScanUrl(saved.shortCode);
+        targetTitle = saved.title;
+        targetSubtitle = saved.subtitle;
+      }
+
       const effectiveTheme: QrLabelThemeId =
         previewMode === "qr" ? "classic" : labelTheme;
       const suffix =
         effectiveTheme === "classic" ? "" : `-${effectiveTheme}`;
       await downloadThemedLabelPng(
         {
-          qrUrl: scanUrl,
-          shortCode: preview.shortCode,
-          title: livePreviewTitle,
-          subtitle: livePreviewSubtitle,
+          qrUrl: targetScanUrl,
+          shortCode: targetShortCode,
+          title: targetTitle,
+          subtitle: targetSubtitle,
           folder: siteFolder.trim(),
           scheduleLabel: liveScheduleLabel,
           theme: effectiveTheme,
@@ -302,10 +606,59 @@ export function HomeWorkbench({ initialTemplateId }: HomeWorkbenchProps) {
           dotStyle,
           showWatermark: false,
         },
-        `fastcc-${preview.shortCode}${suffix}.png`,
+        `fastcc-${targetShortCode}${suffix}.png`,
       );
     } finally {
       setIsDownloadingPng(false);
+    }
+  }
+
+  async function handleDownloadPreviewSvg() {
+    let targetShortCode = activeShortCode;
+    let targetScanUrl = scanUrl;
+
+    if (!isAiTab && !isSavedCurrent) {
+      const saved = await ensureSavedQr();
+      if (!saved) return;
+      targetShortCode = saved.shortCode;
+      targetScanUrl = getQrScanUrl(saved.shortCode);
+    }
+
+    await downloadQrSvg(targetScanUrl, `fastcc-${targetShortCode}.svg`);
+  }
+
+  async function handleOpenStudio() {
+    if (!isAiTab && !isSavedCurrent) {
+      const saved = await ensureSavedQr();
+      if (!saved) return;
+      router.push(`/studio/${saved.shortCode}`);
+      return;
+    }
+    router.push(`/studio/${activeShortCode}`);
+  }
+
+  async function handleOpenWorkerScan() {
+    if (!isAiTab && !isSavedCurrent) {
+      const popup =
+        typeof window !== "undefined"
+          ? window.open("about:blank", "_blank")
+          : null;
+      const saved = await ensureSavedQr();
+      if (!saved) {
+        popup?.close();
+        return;
+      }
+      const targetUrl = getQrScanUrl(saved.shortCode);
+      if (popup) {
+        popup.opener = null;
+        popup.location.assign(targetUrl);
+      } else {
+        router.push(`/q/${saved.shortCode}`);
+      }
+      return;
+    }
+    if (typeof window !== "undefined") {
+      window.open(`/q/${activeShortCode}`, "_blank", "noopener,noreferrer");
     }
   }
 
@@ -314,11 +667,15 @@ export function HomeWorkbench({ initialTemplateId }: HomeWorkbenchProps) {
     options?: { scrollToWorkbench?: boolean },
   ) {
     setSelectedTemplateId(template.id);
+    setTemplateRefSteps(template.steps);
     setActiveTab("text");
     setTextTitle(template.title);
     setSopCategory(template.category);
+    setSopSummary(template.description);
     setTextBody(formatTemplateStepsText(template.steps));
     setChecklistItems(template.checklist.map((item) => ({ ...item })));
+    setSavedQr(null);
+    setQrUpgradeMessage(null);
     setAiStatusMessage(null);
     setAiErrorMessage(null);
     setAiUpgradeMessage(null);
@@ -333,15 +690,21 @@ export function HomeWorkbench({ initialTemplateId }: HomeWorkbenchProps) {
   function handleAddChecklistItem() {
     const trimmed = newChecklistLabel.trim();
     if (!trimmed) return;
+    setSelectedTemplateId(null);
+    setSavedQr(null);
     setChecklistItems((prev) => [...prev, { label: trimmed, required: true }]);
     setNewChecklistLabel("");
   }
 
   function handleRemoveChecklistItem(index: number) {
+    setSelectedTemplateId(null);
+    setSavedQr(null);
     setChecklistItems((prev) => prev.filter((_, idx) => idx !== index));
   }
 
   function handleToggleChecklistRequired(index: number) {
+    setSelectedTemplateId(null);
+    setSavedQr(null);
     setChecklistItems((prev) =>
       prev.map((item, idx) =>
         idx === index ? { ...item, required: !item.required } : item,
@@ -350,98 +713,7 @@ export function HomeWorkbench({ initialTemplateId }: HomeWorkbenchProps) {
   }
 
   async function handleGeneratePermanentQr() {
-    setIsSubmitting(true);
-    setBannerNotice(null);
-    setQrUpgradeMessage(null);
-
-    const isUrlTab = activeTab === "url";
-    const parsedSteps = isUrlTab
-      ? []
-      : parseSopStepsFromText(textBody, selectedTemplate?.steps ?? []);
-    const isSopMode =
-      !isUrlTab &&
-      (checklistItems.length > 0 ||
-        parsedSteps.length > 1 ||
-        Boolean(selectedTemplate) ||
-        Boolean(managerWhatsapp.trim()));
-
-    const title = isUrlTab ? urlTitle : textTitle;
-    const description = isUrlTab
-      ? urlTarget
-      : selectedTemplate?.description ?? textBody;
-    const category = isUrlTab ? "url" : isSopMode ? sopCategory : "text";
-    const trimmedWhatsapp = managerWhatsapp.trim();
-    const rawFolder = siteFolder.trim();
-    const normalizedFolder =
-      rawFolder && rawFolder.toLowerCase() !== "unassigned" ? rawFolder : "";
-
-    const urlConfigObj: Record<string, Json> = {
-      label_theme: labelTheme,
-      theme_color: themeColor,
-    };
-    if (dotStyle !== "square") {
-      urlConfigObj.dot_style = dotStyle;
-    }
-    if (normalizedFolder) {
-      urlConfigObj.folder = normalizedFolder;
-    }
-    if (inspectionSchedule !== "none") {
-      urlConfigObj.inspection_schedule = inspectionSchedule;
-    }
-
-    const configJson: Json | undefined = isUrlTab
-      ? (urlConfigObj as Json)
-      : buildSopConfigJson({
-          summary: selectedTemplate?.description,
-          checklist: checklistItems,
-          managerWhatsapp: trimmedWhatsapp,
-          folder: normalizedFolder,
-          inspectionSchedule,
-          labelTheme,
-          themeColor,
-          dotStyle,
-        });
-
-    const result = await createGuestQrCode({
-      title,
-      description,
-      category,
-      type: isUrlTab ? "url" : isSopMode ? "sop" : "standard",
-      configJson,
-      steps: isSopMode ? parsedSteps : undefined,
-    });
-
-    if (result.blockedByPlanLimit || !result.record) {
-      setQrUpgradeMessage(
-        result.notice ||
-          "Free plan limit reached (10/10 QR codes). Upgrade to Pro for unlimited QR codes.",
-      );
-      setIsSubmitting(false);
-      return;
-    }
-
-    if (normalizedFolder) {
-      setCreatedFolders((prev) =>
-        prev.includes(normalizedFolder) ? prev : [...prev, normalizedFolder],
-      );
-    }
-
-    setPreview({
-      shortCode: result.record.short_code,
-      title: result.record.title,
-      subtitle: isSopMode
-        ? `${parsedSteps.length} SOP steps • ${checklistItems.length} checks`
-        : result.record.description
-          ? result.record.description.slice(0, 64)
-          : "Scan for instructions",
-      isLocalFallback: result.isLocalFallback,
-      isDemo: false,
-    });
-
-    if (result.isLocalFallback && result.notice) {
-      setBannerNotice(result.notice);
-    }
-    setIsSubmitting(false);
+    await ensureSavedQr();
   }
 
   async function handleAiSubmit(mode: "video" | "paper") {
@@ -608,12 +880,12 @@ export function HomeWorkbench({ initialTemplateId }: HomeWorkbenchProps) {
           })),
         );
 
-        setPreview({
+        setAiPreview({
           shortCode: videoResult.short_code,
           title: videoResult.title,
           subtitle: `${videoResult.steps.length} SOP steps • ${aiLanguage}`,
           isLocalFallback: Boolean(videoResult.isLocalFallback),
-          isDemo: false,
+          showWatermark: Boolean(videoResult.show_watermark ?? true),
         });
         setAiStatusMessage(
           `Extracted ${videoResult.steps.length} SOP steps and ${videoResult.checklist.length} QC checks for "${videoResult.title}".`,
@@ -652,12 +924,12 @@ export function HomeWorkbench({ initialTemplateId }: HomeWorkbenchProps) {
           updated_at: now,
         });
 
-        setPreview({
+        setAiPreview({
           shortCode: paperResult.short_code,
           title: paperResult.title,
           subtitle: `${paperResult.fields.length} form fields • ${aiLanguage}`,
           isLocalFallback: Boolean(paperResult.isLocalFallback),
-          isDemo: false,
+          showWatermark: Boolean(paperResult.show_watermark ?? true),
         });
         setAiStatusMessage(
           `Digitized ${paperResult.fields.length} inspection fields for "${paperResult.title}".`,
@@ -755,7 +1027,7 @@ export function HomeWorkbench({ initialTemplateId }: HomeWorkbenchProps) {
           </p>
         </div>
 
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-12 lg:items-start">
           {/* Left Column: Industry Template Picker + Tabbed Input */}
           <div className="rounded-xl border border-border bg-surface shadow-[0_1px_2px_rgba(15,23,42,0.03)] lg:col-span-7">
             {/* Start from Industry Template Picker */}
@@ -862,7 +1134,10 @@ export function HomeWorkbench({ initialTemplateId }: HomeWorkbenchProps) {
                       id="url-title"
                       type="text"
                       value={urlTitle}
-                      onChange={(e) => setUrlTitle(e.target.value)}
+                      onChange={(e) => {
+                        setUrlTitle(e.target.value);
+                        setSavedQr(null);
+                      }}
                       placeholder="e.g., CNC Milling Machine #02 SOP"
                       className="mt-1.5 w-full rounded-lg border border-border bg-surface px-3.5 py-2.5 text-sm text-ink outline-none focus:border-utility-blue"
                     />
@@ -878,7 +1153,10 @@ export function HomeWorkbench({ initialTemplateId }: HomeWorkbenchProps) {
                       id="url-target"
                       type="url"
                       value={urlTarget}
-                      onChange={(e) => setUrlTarget(e.target.value)}
+                      onChange={(e) => {
+                        setUrlTarget(e.target.value);
+                        setSavedQr(null);
+                      }}
                       placeholder="https://..."
                       className="mt-1.5 w-full rounded-lg border border-border bg-surface px-3.5 py-2.5 font-mono text-sm text-ink outline-none focus:border-utility-blue"
                     />
@@ -897,7 +1175,10 @@ export function HomeWorkbench({ initialTemplateId }: HomeWorkbenchProps) {
                         type="text"
                         list="workbench-folder-suggestions"
                         value={siteFolder}
-                        onChange={(e) => setSiteFolder(e.target.value)}
+                        onChange={(e) => {
+                          setSiteFolder(e.target.value);
+                          setSavedQr(null);
+                        }}
                         placeholder="e.g., Main Kitchen, Floor 2, Warehouse A"
                         className="mt-1.5 w-full rounded-lg border border-border bg-surface px-3.5 py-2.5 text-sm text-ink outline-none focus:border-utility-blue"
                       />
@@ -913,11 +1194,12 @@ export function HomeWorkbench({ initialTemplateId }: HomeWorkbenchProps) {
                       <select
                         id="url-inspection-schedule"
                         value={inspectionSchedule}
-                        onChange={(e) =>
+                        onChange={(e) => {
                           setInspectionSchedule(
                             normalizeInspectionSchedule(e.target.value),
-                          )
-                        }
+                          );
+                          setSavedQr(null);
+                        }}
                         className="mt-1.5 w-full rounded-lg border border-border bg-surface px-3.5 py-2.5 text-sm text-ink outline-none focus:border-utility-blue"
                       >
                         {INSPECTION_SCHEDULE_OPTIONS.map((option) => (
@@ -974,7 +1256,12 @@ export function HomeWorkbench({ initialTemplateId }: HomeWorkbenchProps) {
                       id="text-title"
                       type="text"
                       value={textTitle}
-                      onChange={(e) => setTextTitle(e.target.value)}
+                      onChange={(e) => {
+                        setTextTitle(e.target.value);
+                        setSelectedTemplateId(null);
+                        setSopSummary("");
+                        setSavedQr(null);
+                      }}
                       placeholder="e.g., Shift Handover Instructions"
                       className="mt-1.5 w-full rounded-lg border border-border bg-surface px-3.5 py-2.5 text-sm text-ink outline-none focus:border-utility-blue"
                     />
@@ -991,7 +1278,12 @@ export function HomeWorkbench({ initialTemplateId }: HomeWorkbenchProps) {
                       id="text-body"
                       rows={5}
                       value={textBody}
-                      onChange={(e) => setTextBody(e.target.value)}
+                      onChange={(e) => {
+                        setTextBody(e.target.value);
+                        setSelectedTemplateId(null);
+                        setSopSummary("");
+                        setSavedQr(null);
+                      }}
                       placeholder="1. Step title: Step instruction..."
                       className="mt-1.5 w-full rounded-lg border border-border bg-surface px-3.5 py-2.5 text-sm text-ink outline-none focus:border-utility-blue"
                     />
@@ -1086,7 +1378,10 @@ export function HomeWorkbench({ initialTemplateId }: HomeWorkbenchProps) {
                         type="text"
                         list="workbench-folder-suggestions"
                         value={siteFolder}
-                        onChange={(e) => setSiteFolder(e.target.value)}
+                        onChange={(e) => {
+                          setSiteFolder(e.target.value);
+                          setSavedQr(null);
+                        }}
                         placeholder="e.g., Main Kitchen (Optional)"
                         className="mt-1.5 w-full rounded-lg border border-border bg-surface px-3.5 py-2.5 text-sm text-ink outline-none focus:border-utility-blue"
                       />
@@ -1103,11 +1398,12 @@ export function HomeWorkbench({ initialTemplateId }: HomeWorkbenchProps) {
                       <select
                         id="text-inspection-schedule"
                         value={inspectionSchedule}
-                        onChange={(e) =>
+                        onChange={(e) => {
                           setInspectionSchedule(
                             normalizeInspectionSchedule(e.target.value),
-                          )
-                        }
+                          );
+                          setSavedQr(null);
+                        }}
                         className="mt-1.5 w-full rounded-lg border border-border bg-surface px-3.5 py-2.5 text-sm text-ink outline-none focus:border-utility-blue"
                       >
                         {INSPECTION_SCHEDULE_OPTIONS.map((option) => (
@@ -1130,7 +1426,10 @@ export function HomeWorkbench({ initialTemplateId }: HomeWorkbenchProps) {
                         id="text-manager-whatsapp"
                         type="tel"
                         value={managerWhatsapp}
-                        onChange={(e) => setManagerWhatsapp(e.target.value)}
+                        onChange={(e) => {
+                          setManagerWhatsapp(e.target.value);
+                          setSavedQr(null);
+                        }}
                         placeholder="+91 9876543210 (Optional)"
                         className="mt-1.5 w-full rounded-lg border border-border bg-surface px-3.5 py-2.5 font-mono text-sm text-ink outline-none focus:border-utility-blue"
                       />
@@ -1258,7 +1557,10 @@ export function HomeWorkbench({ initialTemplateId }: HomeWorkbenchProps) {
                         type="text"
                         list="workbench-folder-suggestions"
                         value={siteFolder}
-                        onChange={(e) => setSiteFolder(e.target.value)}
+                        onChange={(e) => {
+                          setSiteFolder(e.target.value);
+                          setSavedQr(null);
+                        }}
                         placeholder="e.g., Main Kitchen (Optional)"
                         className="mt-1.5 w-full rounded-lg border border-border bg-surface px-3.5 py-2 text-sm text-ink outline-none focus:border-utility-blue"
                       />
@@ -1274,11 +1576,12 @@ export function HomeWorkbench({ initialTemplateId }: HomeWorkbenchProps) {
                       <select
                         id="ai-inspection-schedule"
                         value={inspectionSchedule}
-                        onChange={(e) =>
+                        onChange={(e) => {
                           setInspectionSchedule(
                             normalizeInspectionSchedule(e.target.value),
-                          )
-                        }
+                          );
+                          setSavedQr(null);
+                        }}
                         className="mt-1.5 w-full rounded-lg border border-border bg-surface px-3.5 py-2 text-sm text-ink outline-none focus:border-utility-blue"
                       >
                         {INSPECTION_SCHEDULE_OPTIONS.map((option) => (
@@ -1300,7 +1603,10 @@ export function HomeWorkbench({ initialTemplateId }: HomeWorkbenchProps) {
                         id="ai-manager-whatsapp"
                         type="tel"
                         value={managerWhatsapp}
-                        onChange={(e) => setManagerWhatsapp(e.target.value)}
+                        onChange={(e) => {
+                          setManagerWhatsapp(e.target.value);
+                          setSavedQr(null);
+                        }}
                         placeholder="+91 9876543210 (Optional)"
                         className="mt-1.5 w-full rounded-lg border border-border bg-surface px-3.5 py-2 font-mono text-sm text-ink outline-none focus:border-utility-blue"
                       />
@@ -1399,202 +1705,257 @@ export function HomeWorkbench({ initialTemplateId }: HomeWorkbenchProps) {
           </div>
 
           {/* Right Column: Live QR Preview */}
-          <div className="flex flex-col justify-between rounded-xl border border-border bg-surface p-6 shadow-[0_1px_2px_rgba(15,23,42,0.03)] lg:col-span-5">
-            <div>
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div
-                  role="tablist"
-                  aria-label="QR Preview Mode"
-                  className="inline-flex rounded-lg border border-border bg-canvas-muted p-0.5"
+          <div className="flex flex-col gap-3 rounded-xl border border-border bg-surface p-5 shadow-[0_1px_2px_rgba(15,23,42,0.03)] lg:sticky lg:top-20 lg:col-span-5">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div
+                role="tablist"
+                aria-label="QR Preview Mode"
+                className="inline-flex rounded-lg border border-border bg-canvas-muted p-0.5"
+              >
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={previewMode === "label"}
+                  onClick={() => setPreviewMode("label")}
+                  className={`rounded-md px-2.5 py-1 text-xs font-semibold transition-colors ${
+                    previewMode === "label"
+                      ? "bg-surface text-ink shadow-2xs"
+                      : "text-ink-muted hover:text-ink"
+                  }`}
                 >
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={previewMode === "label"}
-                    onClick={() => setPreviewMode("label")}
-                    className={`rounded-md px-2.5 py-1 text-xs font-semibold transition-colors ${
-                      previewMode === "label"
-                        ? "bg-surface text-ink shadow-2xs"
-                        : "text-ink-muted hover:text-ink"
-                    }`}
-                  >
-                    Label Preview
-                  </button>
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={previewMode === "qr"}
-                    onClick={() => setPreviewMode("qr")}
-                    className={`rounded-md px-2.5 py-1 text-xs font-semibold transition-colors ${
-                      previewMode === "qr"
-                        ? "bg-surface text-ink shadow-2xs"
-                        : "text-ink-muted hover:text-ink"
-                    }`}
-                  >
-                    QR Code
-                  </button>
-                </div>
+                  Label Preview
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={previewMode === "qr"}
+                  onClick={() => setPreviewMode("qr")}
+                  className={`rounded-md px-2.5 py-1 text-xs font-semibold transition-colors ${
+                    previewMode === "qr"
+                      ? "bg-surface text-ink shadow-2xs"
+                      : "text-ink-muted hover:text-ink"
+                  }`}
+                >
+                  QR Code
+                </button>
+              </div>
 
-                <span className="inline-flex items-center gap-1 rounded border border-border bg-canvas-muted px-2 py-0.5 font-mono text-xs text-ink">
-                  <CheckCircle2 className="h-3.5 w-3.5 text-action-green" />
-                  {preview.shortCode}
+              {isSavedCurrent ? (
+                <span className="inline-flex items-center gap-1 rounded border border-action-green/30 bg-action-green/10 px-2 py-0.5 font-mono text-xs font-semibold text-action-green">
+                  <CheckCircle2 className="h-3.5 w-3.5" />
+                  {activeShortCode}
                 </span>
-              </div>
-
-              <div className="mt-4 flex flex-col items-center justify-center rounded-xl border border-border bg-canvas p-5 text-center">
-                {previewMode === "qr" ? (
-                  <>
-                    <QrCodePreview
-                      value={scanUrl}
-                      size={208}
-                      theme="classic"
-                      dotStyle={dotStyle}
-                    />
-                    <p className="mt-3 text-sm font-semibold text-ink">
-                      {livePreviewTitle}
-                    </p>
-                    <p className="mt-0.5 text-xs text-ink-muted">
-                      {livePreviewSubtitle}
-                    </p>
-                    <p className="mt-1 font-mono text-xs text-ink-muted">
-                      /q/{preview.shortCode}
-                    </p>
-                  </>
-                ) : (
-                  <>
-                    <QrCodePreview
-                      value={scanUrl}
-                      size={184}
-                      theme={labelTheme}
-                      themeColor={themeColor}
-                      dotStyle={dotStyle}
-                      title={livePreviewTitle}
-                      subtitle={livePreviewSubtitle}
-                      folder={siteFolder.trim()}
-                      shortCode={preview.shortCode}
-                      scheduleLabel={liveScheduleLabel}
-                    />
-                    {labelTheme === "classic" ? (
-                      <>
-                        <p className="mt-3 text-sm font-semibold text-ink">
-                          {livePreviewTitle}
-                        </p>
-                        <p className="mt-0.5 text-xs text-ink-muted">
-                          {livePreviewSubtitle}
-                        </p>
-                      </>
-                    ) : null}
-                    <p className="mt-2 font-mono text-[11px] text-ink-muted">
-                      /q/{preview.shortCode}
-                    </p>
-                  </>
-                )}
-              </div>
-
-              {/* Minimal 3-Button Bottom Action Bar */}
-              <div className="mt-3 grid grid-cols-3 gap-2">
-                <button
-                  type="button"
-                  aria-expanded={activePreviewPanel === "beautify"}
-                  onClick={() =>
-                    setActivePreviewPanel((prev) =>
-                      prev === "beautify" ? "none" : "beautify",
-                    )
-                  }
-                  className={`inline-flex min-h-10 items-center justify-center gap-1.5 rounded-lg border px-2.5 text-xs font-semibold transition-colors ${
-                    activePreviewPanel === "beautify"
-                      ? "border-ink bg-canvas-muted text-ink"
-                      : "border-border bg-surface text-ink hover:bg-canvas-muted"
-                  }`}
-                >
-                  <Palette className="h-3.5 w-3.5 text-utility-blue" />
-                  Beautify
-                </button>
-                <button
-                  type="button"
-                  aria-expanded={activePreviewPanel === "theme"}
-                  onClick={() =>
-                    setActivePreviewPanel((prev) =>
-                      prev === "theme" ? "none" : "theme",
-                    )
-                  }
-                  className={`inline-flex min-h-10 items-center justify-center gap-1.5 rounded-lg border px-2.5 text-xs font-semibold transition-colors ${
-                    activePreviewPanel === "theme"
-                      ? "border-utility-blue bg-utility-blue/5 text-ink"
-                      : "border-border bg-surface text-ink hover:bg-canvas-muted"
-                  }`}
-                >
-                  <LayoutGrid className="h-3.5 w-3.5 text-utility-blue" />
-                  Label Theme
-                </button>
-                <button
-                  type="button"
-                  disabled={isDownloadingPng}
-                  onClick={handleDownloadPreviewPng}
-                  className="inline-flex min-h-10 items-center justify-center gap-1.5 rounded-lg border border-border bg-surface px-2.5 text-xs font-semibold text-ink transition-colors hover:bg-canvas-muted disabled:opacity-60"
-                >
-                  <Download className="h-3.5 w-3.5 text-action-green" />
-                  {isDownloadingPng ? "Saving..." : "Download"}
-                </button>
-              </div>
-
-              {activePreviewPanel === "beautify" ? (
-                <div className="mt-3 rounded-xl border border-border bg-canvas p-3.5">
-                  <QrBeautifyControls
-                    themeColor={themeColor}
-                    dotStyle={dotStyle}
-                    onSelectColor={(color) => setThemeColor(color)}
-                    onSelectDotStyle={(style) => setDotStyle(style)}
-                  />
-                </div>
-              ) : null}
-
-              {activePreviewPanel === "theme" ? (
-                <div className="mt-3 rounded-xl border border-border bg-canvas p-3.5">
-                  <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-ink-muted">
-                    Choose Print Label Theme (Free for All Users)
-                  </p>
-                  <QrLabelThemeGrid
-                    selectedTheme={labelTheme}
-                    themeColor={themeColor}
-                    onSelectTheme={(theme) => {
-                      setLabelTheme(theme);
-                      setPreviewMode("label");
-                    }}
-                  />
-                </div>
-              ) : null}
+              ) : (
+                <span className="inline-flex items-center gap-1 rounded border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 font-mono text-[11px] font-semibold text-amber-700">
+                  Unsaved Draft
+                </span>
+              )}
             </div>
 
-            <div className="mt-4 space-y-2.5">
+            <div className="flex flex-col items-center justify-center rounded-xl border border-border bg-canvas p-4 text-center">
+              <div className="relative inline-flex max-w-full items-center justify-center">
+                {previewMode === "qr" ? (
+                  <QrCodePreview
+                    value={scanUrl}
+                    size={196}
+                    theme="classic"
+                    dotStyle={dotStyle}
+                  />
+                ) : (
+                  <QrCodePreview
+                    value={scanUrl}
+                    size={180}
+                    theme={labelTheme}
+                    themeColor={themeColor}
+                    dotStyle={dotStyle}
+                    title={livePreviewTitle}
+                    subtitle={livePreviewSubtitle}
+                    folder={siteFolder.trim()}
+                    shortCode={activeShortCode || "DRAFT"}
+                    scheduleLabel={liveScheduleLabel}
+                  />
+                )}
+
+                {!isSavedCurrent && !isAiTab ? (
+                  <div className="absolute inset-0 flex flex-col items-center justify-center rounded-xl bg-white/75 px-4 backdrop-blur-[2px]">
+                    <button
+                      type="button"
+                      disabled={isSubmitting}
+                      onClick={handleGeneratePermanentQr}
+                      className="inline-flex min-h-9 items-center gap-1.5 rounded-lg bg-action-green px-3.5 text-xs font-semibold text-white shadow-sm transition-opacity hover:opacity-95 disabled:opacity-60"
+                    >
+                      {isSubmitting ? (
+                        <>
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          Generating...
+                        </>
+                      ) : (
+                        <>
+                          Generate Live QR
+                          <ArrowRight className="h-3.5 w-3.5" />
+                        </>
+                      )}
+                    </button>
+                    <span className="mt-1.5 text-[11px] font-medium text-ink-muted">
+                      Saves edits &amp; activates scan link
+                    </span>
+                  </div>
+                ) : null}
+              </div>
+
+              {previewMode === "qr" || labelTheme === "classic" ? (
+                <>
+                  <p className="mt-2.5 text-sm font-semibold text-ink">
+                    {livePreviewTitle}
+                  </p>
+                  <p className="mt-0.5 max-w-full truncate text-xs text-ink-muted">
+                    {livePreviewSubtitle}
+                  </p>
+                </>
+              ) : null}
+
+              <p className="mt-1.5 font-mono text-[11px] text-ink-muted">
+                {isSavedCurrent
+                  ? `/q/${activeShortCode}`
+                  : "Click Generate Permanent QR to lock link"}
+              </p>
+            </div>
+
+            {/* Minimal 3-Button Customize / Download Bar */}
+            <div className="grid grid-cols-3 gap-2">
               <button
                 type="button"
+                aria-expanded={activePreviewPanel === "beautify"}
                 onClick={() =>
-                  downloadQrSvg(scanUrl, `fastcc-${preview.shortCode}.svg`)
+                  setActivePreviewPanel((prev) =>
+                    prev === "beautify" ? "none" : "beautify",
+                  )
                 }
-                className="inline-flex min-h-10 w-full items-center justify-center gap-1.5 rounded-lg border border-border bg-surface px-3 text-xs font-semibold text-ink transition-colors hover:bg-canvas-muted"
+                className={`inline-flex min-h-10 items-center justify-center gap-1.5 rounded-lg border px-2.5 text-xs font-semibold transition-colors ${
+                  activePreviewPanel === "beautify"
+                    ? "border-ink bg-canvas-muted text-ink"
+                    : "border-border bg-surface text-ink hover:bg-canvas-muted"
+                }`}
               >
-                <Download className="h-3.5 w-3.5 text-utility-blue" />
-                Download Vector SVG
+                <Palette className="h-3.5 w-3.5 text-utility-blue" />
+                Beautify
               </button>
-
-              <Link
-                href={`/studio/${preview.shortCode}`}
-                className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-lg bg-utility-blue px-4 text-sm font-semibold text-white transition-opacity hover:opacity-95"
+              <button
+                type="button"
+                aria-expanded={activePreviewPanel === "theme"}
+                onClick={() =>
+                  setActivePreviewPanel((prev) =>
+                    prev === "theme" ? "none" : "theme",
+                  )
+                }
+                className={`inline-flex min-h-10 items-center justify-center gap-1.5 rounded-lg border px-2.5 text-xs font-semibold transition-colors ${
+                  activePreviewPanel === "theme"
+                    ? "border-utility-blue bg-utility-blue/5 text-ink"
+                    : "border-border bg-surface text-ink hover:bg-canvas-muted"
+                }`}
               >
-                Open Label Studio
-                <ExternalLink className="h-4 w-4" />
-              </Link>
-
-              <Link
-                href={`/q/${preview.shortCode}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-lg border border-border bg-surface px-4 text-xs font-semibold text-ink transition-colors hover:bg-canvas-muted"
+                <LayoutGrid className="h-3.5 w-3.5 text-utility-blue" />
+                Label Theme
+              </button>
+              <button
+                type="button"
+                disabled={isDownloadingPng || isSubmitting}
+                onClick={handleDownloadPreviewPng}
+                className="inline-flex min-h-10 items-center justify-center gap-1.5 rounded-lg border border-border bg-surface px-2.5 text-xs font-semibold text-ink transition-colors hover:bg-canvas-muted disabled:opacity-60"
               >
-                Test Worker Scan View
-                <ArrowRight className="h-3.5 w-3.5" />
-              </Link>
+                <Download className="h-3.5 w-3.5 text-action-green" />
+                {isDownloadingPng ? "Saving..." : "Download"}
+              </button>
+            </div>
+
+            {activePreviewPanel === "beautify" ? (
+              <div className="rounded-xl border border-border bg-canvas p-3">
+                <QrBeautifyControls
+                  themeColor={themeColor}
+                  dotStyle={dotStyle}
+                  onSelectColor={(color) => {
+                    setThemeColor(color);
+                    void syncSavedThemeConfig(labelTheme, color, dotStyle);
+                  }}
+                  onSelectDotStyle={(style) => {
+                    setDotStyle(style);
+                    void syncSavedThemeConfig(labelTheme, themeColor, style);
+                  }}
+                />
+              </div>
+            ) : null}
+
+            {activePreviewPanel === "theme" ? (
+              <div className="rounded-xl border border-border bg-canvas p-3">
+                <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-ink-muted">
+                  Choose Print Label Theme (Free for All Users)
+                </p>
+                <QrLabelThemeGrid
+                  selectedTheme={labelTheme}
+                  themeColor={themeColor}
+                  onSelectTheme={(theme) => {
+                    setLabelTheme(theme);
+                    setPreviewMode("label");
+                    void syncSavedThemeConfig(theme, themeColor, dotStyle);
+                  }}
+                />
+              </div>
+            ) : null}
+
+            <div className="space-y-2 border-t border-border pt-3">
+              {isSavedCurrent ? (
+                <Link
+                  href={`/studio/${activeShortCode}`}
+                  className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-lg bg-utility-blue px-4 text-sm font-semibold text-white transition-opacity hover:opacity-95"
+                >
+                  Open Label Studio
+                  <ExternalLink className="h-4 w-4" />
+                </Link>
+              ) : (
+                <button
+                  type="button"
+                  disabled={isSubmitting}
+                  onClick={handleOpenStudio}
+                  className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-lg bg-utility-blue px-4 text-sm font-semibold text-white transition-opacity hover:opacity-95 disabled:opacity-60"
+                >
+                  Open Label Studio
+                  <ExternalLink className="h-4 w-4" />
+                </button>
+              )}
+
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  disabled={isSubmitting}
+                  onClick={handleDownloadPreviewSvg}
+                  className="inline-flex min-h-10 items-center justify-center gap-1.5 rounded-lg border border-border bg-surface px-3 text-xs font-semibold text-ink transition-colors hover:bg-canvas-muted disabled:opacity-60"
+                >
+                  <Download className="h-3.5 w-3.5 text-utility-blue" />
+                  Download Vector SVG
+                </button>
+
+                {isSavedCurrent ? (
+                  <Link
+                    href={`/q/${activeShortCode}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex min-h-10 items-center justify-center gap-1.5 rounded-lg border border-border bg-surface px-3 text-xs font-semibold text-ink transition-colors hover:bg-canvas-muted"
+                  >
+                    Test Worker Scan View
+                    <ArrowRight className="h-3.5 w-3.5" />
+                  </Link>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={isSubmitting}
+                    onClick={handleOpenWorkerScan}
+                    className="inline-flex min-h-10 items-center justify-center gap-1.5 rounded-lg border border-border bg-surface px-3 text-xs font-semibold text-ink transition-colors hover:bg-canvas-muted disabled:opacity-60"
+                  >
+                    Test Worker Scan View
+                    <ArrowRight className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         </div>

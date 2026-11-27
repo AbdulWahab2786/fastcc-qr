@@ -1,5 +1,6 @@
 import { Suspense } from "react";
 import type { Metadata } from "next";
+import { connection } from "next/server";
 import { PricingClient } from "@/components/PricingClient";
 import { getUserPlanStatus } from "@/lib/billing/plans";
 import { hasSupabaseEnv } from "@/lib/supabase/env";
@@ -13,6 +14,7 @@ export const metadata: Metadata = {
 };
 
 async function PricingContent() {
+  await connection();
   let isAuthenticated = false;
   let currentPlan: PlanTier = "free";
   let userEmail = "";

@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -67,7 +68,7 @@ export async function generateMetadata({
   };
 }
 
-export default async function TemplateDetailPage({
+async function TemplateDetailContent({
   params,
 }: TemplateDetailPageProps) {
   const { slug } = await params;
@@ -389,5 +390,21 @@ export default async function TemplateDetailPage({
         </Link>
       </div>
     </main>
+  );
+}
+
+export default function TemplateDetailPage({
+  params,
+}: TemplateDetailPageProps) {
+  return (
+    <Suspense
+      fallback={
+        <main className="mx-auto max-w-6xl px-4 py-8 sm:px-6 sm:py-10">
+          <div className="h-96 animate-pulse rounded-xl border border-border bg-surface" />
+        </main>
+      }
+    >
+      <TemplateDetailContent params={params} />
+    </Suspense>
   );
 }

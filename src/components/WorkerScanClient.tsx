@@ -483,6 +483,7 @@ export function WorkerScanClient({
     if (!hasTranslatableContent) return;
 
     let cancelled = false;
+    const controller = new AbortController();
     const storageKey = `fastcc_tr_${record.id}_${lang}`;
 
     async function loadTranslation() {
@@ -522,12 +523,14 @@ export function WorkerScanClient({
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: translationRequestBody,
+          signal: controller.signal,
         });
         if (!res.ok) return;
         const data = (await res.json()) as unknown;
         if (
           !cancelled &&
           isRecord(data) &&
+          data.fallback !== true &&
           typeof data.title === "string" &&
           Array.isArray(data.items)
         ) {
@@ -545,7 +548,7 @@ export function WorkerScanClient({
           }
         }
       } catch {
-        // Silent fallback to English.
+        // Silent fallback to English (including request aborts).
       } finally {
         if (!cancelled) {
           setTranslatingKey((prev) => (prev === cacheKey ? null : prev));
@@ -556,6 +559,7 @@ export function WorkerScanClient({
     void loadTranslation();
     return () => {
       cancelled = true;
+      controller.abort();
     };
   }, [
     lang,
@@ -668,6 +672,11 @@ export function WorkerScanClient({
         (f) => f.type === "pass_fail" && formValues[f.id] === "fail",
       );
       if (hasFail) status = "fail";
+    }
+    if (equipmentStatus === "faulty") {
+      status = "fail";
+    } else if (equipmentStatus === "maintenance" && status === "pass") {
+      status = "issue";
     }
 
     const stepResultsPayload = {
