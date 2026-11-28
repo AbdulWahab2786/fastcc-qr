@@ -9,6 +9,7 @@ import {
   Printer,
   ShieldCheck,
 } from "lucide-react";
+import { FounderStorySection } from "@/components/FounderStorySection";
 import { SavingsComparison } from "@/components/SavingsComparison";
 import { FREE_QR_LIMIT } from "@/lib/billing/constants";
 
@@ -186,6 +187,9 @@ export function LandingShowcase() {
           ))}
         </div>
       </section>
+
+      {/* Editorial Founder Story USP */}
+      <FounderStorySection />
 
       {/* Bottom B2B CTA Banner */}
       <section
