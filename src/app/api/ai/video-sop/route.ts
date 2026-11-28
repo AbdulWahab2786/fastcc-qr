@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createPartFromUri, FileState, Type, type Schema } from "@google/genai";
+import { generateGroqVisionJson, type GroqImageInput } from "@/lib/ai/groq";
 import {
   enforceAiRequestGuard,
   GEMINI_MODEL,
@@ -21,6 +22,8 @@ import type {
 } from "@/types/ai";
 
 const MAX_VIDEO_BYTES = 25 * 1024 * 1024;
+const MAX_IMAGE_BYTES = 15 * 1024 * 1024;
+const MAX_FRAMES = 5;
 const FILE_POLL_INTERVAL_MS = 2000;
 const FILE_POLL_MAX_ATTEMPTS = 30;
 
@@ -214,33 +217,84 @@ export async function POST(request: Request) {
     );
   }
 
-  const fileEntry = formData.get("video") ?? formData.get("file");
-  if (!(fileEntry instanceof File)) {
+  const frameEntries = formData
+    .getAll("frames")
+    .filter((entry): entry is File => entry instanceof File && entry.size > 0)
+    .slice(0, MAX_FRAMES);
+
+  const imageEntry = formData.get("image");
+  const rawFileEntry = formData.get("video") ?? formData.get("file");
+
+  const singleImageFile =
+    imageEntry instanceof File && imageEntry.size > 0
+      ? imageEntry
+      : rawFileEntry instanceof File &&
+          rawFileEntry.size > 0 &&
+          rawFileEntry.type.startsWith("image/")
+        ? rawFileEntry
+        : null;
+
+  const videoFile =
+    rawFileEntry instanceof File &&
+    rawFileEntry.size > 0 &&
+    !rawFileEntry.type.startsWith("image/")
+      ? rawFileEntry
+      : null;
+
+  if (frameEntries.length === 0 && !singleImageFile && !videoFile) {
     return NextResponse.json(
-      { error: "Missing video file in form data." },
+      { error: "Missing video frames, image, or video file in form data." },
       { status: 400 },
     );
   }
 
-  if (fileEntry.size === 0) {
-    return NextResponse.json(
-      { error: "Uploaded video file is empty." },
-      { status: 400 },
-    );
+  for (const frame of frameEntries) {
+    if (frame.size > MAX_IMAGE_BYTES) {
+      return NextResponse.json(
+        { error: "Extracted frame exceeds the 15MB upload limit." },
+        { status: 413 },
+      );
+    }
+    if (frame.type && !frame.type.startsWith("image/")) {
+      return NextResponse.json(
+        { error: `Unsupported frame type "${frame.type}".` },
+        { status: 400 },
+      );
+    }
   }
 
-  if (fileEntry.size > MAX_VIDEO_BYTES) {
-    return NextResponse.json(
-      { error: "Video file exceeds the 25MB upload limit." },
-      { status: 413 },
-    );
+  if (singleImageFile) {
+    if (singleImageFile.size > MAX_IMAGE_BYTES) {
+      return NextResponse.json(
+        { error: "Image file exceeds the 15MB upload limit." },
+        { status: 413 },
+      );
+    }
+    if (singleImageFile.type && !singleImageFile.type.startsWith("image/")) {
+      return NextResponse.json(
+        {
+          error: `Unsupported file type "${singleImageFile.type}". Upload an image file.`,
+        },
+        { status: 400 },
+      );
+    }
   }
 
-  if (fileEntry.type && !fileEntry.type.startsWith("video/")) {
-    return NextResponse.json(
-      { error: `Unsupported file type "${fileEntry.type}". Upload a video file.` },
-      { status: 400 },
-    );
+  if (videoFile) {
+    if (videoFile.size > MAX_VIDEO_BYTES) {
+      return NextResponse.json(
+        { error: "Video file exceeds the 25MB upload limit." },
+        { status: 413 },
+      );
+    }
+    if (videoFile.type && !videoFile.type.startsWith("video/")) {
+      return NextResponse.json(
+        {
+          error: `Unsupported file type "${videoFile.type}". Upload a video file.`,
+        },
+        { status: 400 },
+      );
+    }
   }
 
   const optionalTitleEntry = formData.get("title");
@@ -248,6 +302,12 @@ export async function POST(request: Request) {
     typeof optionalTitleEntry === "string" && optionalTitleEntry.trim()
       ? optionalTitleEntry.trim()
       : "Shop-Floor Video SOP";
+
+  const durationEntry = formData.get("video_duration_sec");
+  const videoDurationSec =
+    typeof durationEntry === "string" && Number.isFinite(Number(durationEntry))
+      ? Math.max(1, Math.round(Number(durationEntry)))
+      : null;
 
   const languages = parseLanguagesField(formData.getAll("languages"));
   const managerWhatsappEntry = formData.get("manager_whatsapp");
@@ -266,74 +326,157 @@ export async function POST(request: Request) {
     formData.get("inspection_schedule"),
   );
 
-  let ai: ReturnType<typeof getGeminiClient>;
-  try {
-    ai = getGeminiClient();
-  } catch (err) {
-    const message =
-      err instanceof Error ? err.message : "Gemini client unavailable.";
-    return NextResponse.json({ error: message }, { status: 503 });
-  }
-
   let uploadedFileName: string | undefined;
+  let geminiClientForCleanup: ReturnType<typeof getGeminiClient> | null = null;
 
   try {
-    const uploaded = await ai.files.upload({
-      file: fileEntry,
-      config: {
-        mimeType: fileEntry.type || "video/mp4",
-        displayName: fileEntry.name || "shop-floor-sop-video",
-      },
-    });
+    const sourceImages =
+      frameEntries.length > 0
+        ? frameEntries
+        : singleImageFile
+          ? [singleImageFile]
+          : [];
 
-    uploadedFileName = uploaded.name;
-    let activeFile = uploaded;
+    const imageInputs: GroqImageInput[] = await Promise.all(
+      sourceImages.map(async (imgFile) => ({
+        base64Data: Buffer.from(await imgFile.arrayBuffer()).toString("base64"),
+        mimeType: imgFile.type || "image/jpeg",
+      })),
+    );
 
-    for (let attempt = 0; attempt < FILE_POLL_MAX_ATTEMPTS; attempt += 1) {
-      if (activeFile.state === FileState.ACTIVE) break;
-      if (activeFile.state === FileState.FAILED) {
-        throw new Error(
-          activeFile.error?.message ||
-            "Gemini failed to process the uploaded video.",
-        );
-      }
-      await sleep(FILE_POLL_INTERVAL_MS);
-      if (!uploadedFileName) break;
-      activeFile = await ai.files.get({ name: uploadedFileName });
-    }
-
-    if (activeFile.state !== FileState.ACTIVE || !activeFile.uri) {
-      throw new Error(
-        "Timed out waiting for Gemini to process the uploaded video.",
-      );
-    }
+    const mediaContextHint =
+      frameEntries.length > 0
+        ? `You are analyzing ${frameEntries.length} sequential key frames extracted from a shop-floor SOP video${videoDurationSec ? ` (~${videoDurationSec}s total duration)` : ""}.`
+        : singleImageFile
+          ? "You are analyzing a shop-floor equipment or process image to build a frontline SOP."
+          : "You are analyzing a shop-floor video to build a frontline SOP.";
 
     const prompt = [
-      "You are an industrial operations engineer creating a frontline Standard Operating Procedure (SOP) from a shop-floor video.",
+      "You are an industrial operations engineer creating a frontline Standard Operating Procedure (SOP).",
+      mediaContextHint,
       `Requested title hint: "${optionalTitle}".`,
       `Target worker languages for translations: ${languages.join(", ")}.`,
-      "Analyze the video carefully and return JSON matching the schema:",
-      "1. Extract a clear, concise SOP `title` and a 1-2 sentence `summary`.",
-      "2. Break the procedure into 3 to 10 concise, numbered operational `steps` with `step_number` (1-indexed), `timestamp_sec` (integer seconds where the step starts), `title`, `description`, and `translations` array containing an entry for EVERY requested language.",
-      "3. Generate a 3 to 6 item interactive QC `checklist` (`label`, `required`) for frontline sign-off.",
+      "Return ONLY valid JSON matching this exact structure:",
+      "{",
+      '  "title": "Clear, concise SOP title",',
+      '  "summary": "1-2 sentence operational summary",',
+      '  "steps": [',
+      "    {",
+      '      "step_number": 1,',
+      '      "timestamp_sec": 0,',
+      '      "title": "Step title",',
+      '      "description": "Clear operational instruction",',
+      '      "translations": [{ "language": "LanguageName", "title": "Translated title", "description": "Translated instruction" }]',
+      "    }",
+      "  ],",
+      '  "checklist": [',
+      '    { "label": "Frontline QC sign-off check", "required": true }',
+      "  ]",
+      "}",
+      "Include 3 to 10 numbered `steps` (with `translations` for EVERY requested language) and 3 to 6 `checklist` items.",
     ].join("\n");
 
-    const response = await ai.models.generateContent({
-      model: GEMINI_MODEL,
-      contents: [
-        createPartFromUri(
-          activeFile.uri,
-          activeFile.mimeType || fileEntry.type || "video/mp4",
-        ),
-        prompt,
-      ],
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: VIDEO_SOP_SCHEMA,
-      },
-    });
+    let parsed: unknown;
+    let groqError: unknown;
 
-    const parsed = parseGeminiJson(response.text);
+    if (imageInputs.length > 0) {
+      try {
+        parsed = await generateGroqVisionJson({
+          prompt,
+          images: imageInputs,
+        });
+      } catch (err) {
+        groqError = err;
+      }
+    }
+
+    if (parsed === undefined) {
+      try {
+        const ai = getGeminiClient();
+        geminiClientForCleanup = ai;
+
+        if (videoFile) {
+          const uploaded = await ai.files.upload({
+            file: videoFile,
+            config: {
+              mimeType: videoFile.type || "video/mp4",
+              displayName: videoFile.name || "shop-floor-sop-video",
+            },
+          });
+
+          uploadedFileName = uploaded.name;
+          let activeFile = uploaded;
+
+          for (let attempt = 0; attempt < FILE_POLL_MAX_ATTEMPTS; attempt += 1) {
+            if (activeFile.state === FileState.ACTIVE) break;
+            if (activeFile.state === FileState.FAILED) {
+              throw new Error(
+                activeFile.error?.message ||
+                  "Gemini failed to process the uploaded video.",
+              );
+            }
+            await sleep(FILE_POLL_INTERVAL_MS);
+            if (!uploadedFileName) break;
+            activeFile = await ai.files.get({ name: uploadedFileName });
+          }
+
+          if (activeFile.state !== FileState.ACTIVE || !activeFile.uri) {
+            throw new Error(
+              "Timed out waiting for Gemini to process the uploaded video.",
+            );
+          }
+
+          const response = await ai.models.generateContent({
+            model: GEMINI_MODEL,
+            contents: [
+              createPartFromUri(
+                activeFile.uri,
+                activeFile.mimeType || videoFile.type || "video/mp4",
+              ),
+              prompt,
+            ],
+            config: {
+              responseMimeType: "application/json",
+              responseSchema: VIDEO_SOP_SCHEMA,
+            },
+          });
+
+          parsed = parseGeminiJson(response.text);
+        } else if (imageInputs.length > 0) {
+          const response = await ai.models.generateContent({
+            model: GEMINI_MODEL,
+            contents: [
+              ...imageInputs.map((img) => ({
+                inlineData: {
+                  data: img.base64Data,
+                  mimeType: img.mimeType,
+                },
+              })),
+              prompt,
+            ],
+            config: {
+              responseMimeType: "application/json",
+              responseSchema: VIDEO_SOP_SCHEMA,
+            },
+          });
+
+          parsed = parseGeminiJson(response.text);
+        } else {
+          throw new Error("No media available for Gemini fallback.");
+        }
+      } catch (geminiErr) {
+        const groqMsg =
+          groqError instanceof Error ? groqError.message : null;
+        const geminiMsg =
+          geminiErr instanceof Error
+            ? geminiErr.message
+            : "Gemini fallback failed";
+        throw new Error(
+          groqMsg ? `${groqMsg}; fallback error: ${geminiMsg}` : geminiMsg,
+        );
+      }
+    }
+
     const normalized = normalizeVideoSopOutput(parsed, optionalTitle);
 
     const configJson = {
@@ -377,9 +520,9 @@ export async function POST(request: Request) {
       err instanceof Error ? err.message : "Failed to extract SOP from video.";
     return NextResponse.json({ error: message }, { status: 500 });
   } finally {
-    if (uploadedFileName) {
+    if (uploadedFileName && geminiClientForCleanup) {
       try {
-        await ai.files.delete({ name: uploadedFileName });
+        await geminiClientForCleanup.files.delete({ name: uploadedFileName });
       } catch {
         // Ignore cleanup errors so they never mask the primary response.
       }

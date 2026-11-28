@@ -44,6 +44,7 @@ import {
   QrBeautifyControls,
   QrLabelThemeGrid,
 } from "@/components/QrLabelThemePicker";
+import { extractVideoKeyFrames } from "@/lib/ai/video-frames";
 import {
   buildSopConfigJson,
   formatTemplateStepsText,
@@ -774,7 +775,27 @@ export function HomeWorkbench({ initialTemplateId }: HomeWorkbenchProps) {
       rawFolder && rawFolder.toLowerCase() !== "unassigned" ? rawFolder : "";
 
     const formData = new FormData();
-    formData.append(fieldName, selectedFile);
+    if (mode === "video") {
+      setIsAiProcessing(true);
+      setAiStatusMessage("Extracting key frames from your video...");
+      try {
+        const { frames, durationSec } = await extractVideoKeyFrames(
+          selectedFile,
+          5,
+        );
+        for (const frame of frames) {
+          formData.append("frames", frame);
+        }
+        formData.append("video_duration_sec", String(durationSec));
+        if (selectedFile.size <= 4 * 1024 * 1024) {
+          formData.append(fieldName, selectedFile);
+        }
+      } catch {
+        formData.append(fieldName, selectedFile);
+      }
+    } else {
+      formData.append(fieldName, selectedFile);
+    }
     formData.append("languages", JSON.stringify([aiLanguage]));
     if (managerWhatsapp.trim()) {
       formData.append("manager_whatsapp", managerWhatsapp.trim());

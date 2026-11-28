@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { Type, type Schema } from "@google/genai";
+import { generateGroqVisionJson } from "@/lib/ai/groq";
 import {
   enforceAiRequestGuard,
   GEMINI_MODEL,
@@ -210,15 +211,6 @@ export async function POST(request: Request) {
     formData.get("inspection_schedule"),
   );
 
-  let ai: ReturnType<typeof getGeminiClient>;
-  try {
-    ai = getGeminiClient();
-  } catch (err) {
-    const message =
-      err instanceof Error ? err.message : "Gemini client unavailable.";
-    return NextResponse.json({ error: message }, { status: 503 });
-  }
-
   try {
     const arrayBuffer = await fileEntry.arrayBuffer();
     const base64Data = Buffer.from(arrayBuffer).toString("base64");
@@ -227,33 +219,64 @@ export async function POST(request: Request) {
     const prompt = [
       "You are digitizing a photo of a paper logbook, checklist, or inspection register into a structured mobile frontline form.",
       `Target worker languages for translations: ${languages.join(", ")}.`,
-      "Extract the form `title` and every check item or field into `fields`.",
-      "For each field:",
-      "- `id`: concise snake_case identifier",
-      "- `label`: clear field label",
-      "- `type`: one of 'pass_fail', 'text', 'number', 'photo'",
-      "- `required`: boolean",
-      "- `translations`: array of { language, label } for EVERY requested language.",
+      "Return ONLY valid JSON matching this exact structure:",
+      '{',
+      '  "title": "string",',
+      '  "fields": [',
+      '    {',
+      '      "id": "concise_snake_case_identifier",',
+      '      "label": "Clear field label",',
+      '      "type": "pass_fail" | "text" | "number" | "photo",',
+      '      "required": true,',
+      '      "translations": [{ "language": "LanguageName", "label": "Translated label" }]',
+      '    }',
+      '  ]',
+      '}',
+      "Include an entry in `translations` for EVERY requested language.",
     ].join("\n");
 
-    const response = await ai.models.generateContent({
-      model: GEMINI_MODEL,
-      contents: [
-        {
-          inlineData: {
-            data: base64Data,
-            mimeType,
-          },
-        },
+    let parsed: unknown;
+    let groqError: unknown;
+    try {
+      parsed = await generateGroqVisionJson({
         prompt,
-      ],
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: PAPER_FORM_SCHEMA,
-      },
-    });
+        images: [{ base64Data, mimeType }],
+      });
+    } catch (err) {
+      groqError = err;
+    }
 
-    const parsed = parseGeminiJson(response.text);
+    if (parsed === undefined) {
+      try {
+        const ai = getGeminiClient();
+        const response = await ai.models.generateContent({
+          model: GEMINI_MODEL,
+          contents: [
+            {
+              inlineData: {
+                data: base64Data,
+                mimeType,
+              },
+            },
+            prompt,
+          ],
+          config: {
+            responseMimeType: "application/json",
+            responseSchema: PAPER_FORM_SCHEMA,
+          },
+        });
+        parsed = parseGeminiJson(response.text);
+      } catch (geminiErr) {
+        const groqMsg =
+          groqError instanceof Error ? groqError.message : "Groq Vision failed";
+        const geminiMsg =
+          geminiErr instanceof Error
+            ? geminiErr.message
+            : "Gemini fallback failed";
+        throw new Error(`${groqMsg}; fallback error: ${geminiMsg}`);
+      }
+    }
+
     const normalized = normalizePaperFormOutput(parsed);
 
     const configJson = {
